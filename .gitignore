@@ -1,0 +1,12 @@
+.env
+.venv/
+**/.venv
+__pycache__/
+*.py[cod]
+node_modules/
+dist/
+data/external/**/raw/*
+!data/external/**/README.md
+!data/external/**/metadata.json
+*.sqlite3
+models/**/*.joblib
