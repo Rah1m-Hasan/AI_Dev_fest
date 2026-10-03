@@ -1,0 +1,31 @@
+{
+  "framework": null,
+  "buildCommand": "cd frontend && npm install && npm run build",
+  "outputDirectory": "frontend/dist",
+  "installCommand": "cd frontend && npm install",
+  "devCommand": "cd frontend && npm run dev",
+  "regions": ["sin1"],
+  "functions": {
+    "api/**/*.py": {
+      "runtime": "python-3.12",
+      "entrypoint": "backend/app/main.py"
+    }
+  },
+  "routes": [
+    {
+      "src": "/api/(.*)",
+      "dest": "/api/$1"
+    },
+    {
+      "src": "/(.*)",
+      "dest": "/frontend/dist/$1"
+    }
+  ],
+  "env": {
+    "ENVIRONMENT": "production",
+    "DATABASE_URL": "@database_url",
+    "GROQ_API_KEY": "@groq_api_key",
+    "JWT_SECRET_KEY": "@jwt_secret_key",
+    "FRONTEND_URL": "@frontend_url"
+  }
+}

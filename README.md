@@ -1,232 +1,854 @@
-# UPAY AI ASSIST
+# Upay AI Financial Coach
 
-> A hackathon concept prototype for DIU CPC × upay AI Hackathon / AI DEV FEST 2026. **It uses synthetic demo data only and is not an official production upay service.**
+> **upay handles money; AI Assist helps people understand, plan, and act on it more confidently.**
 
-**upay handles money. AI Assist helps people understand, plan, and act on it more confidently.**
+Upay AI Financial Coach is an AI-powered financial guidance and assisted-action prototype designed for the **DIU CPC × upay AI Hackathon / AI DEV FEST 2026**. It demonstrates how an intelligence layer could complement an MFS experience by helping customers understand their financial behavior, plan more confidently, and complete actions through guided conversational workflows.
 
-UPAY AI ASSIST is a **concept integration prototype** for an intelligence layer inside the familiar upay experience. It helps a customer understand what changed, decide whether an action fits their current context, prepare that action in natural language, and confirm it themselves. It is not an official upay product, replacement wallet, autonomous financial agent, lending system, or production payment integration.
+---
 
-The demo starts on a compact upay-style home, adds **AI Financial Coach** as a service entry, and demonstrates integration points in History, Account/Financial Health, and Offers without claiming access to a production upay API.
+> **This project is a concept prototype developed for the DIU CPC × upay AI Hackathon / AI DEV FEST 2026. It uses synthetic demo data only and is not an official production upay service. No real upay customer data is used. No real financial transactions are executed.**
 
-## Problem and solution
+---
 
-People can see a wallet balance but often cannot connect it to spending behavior, recurring commitments, month-end pressure, or a realistic savings plan. The prototype joins transaction intelligence, deterministic analytics, interpretable forecasting and a grounded language layer into a single coaching experience.
+## Team Ora 3 Jon
 
-```mermaid
-flowchart LR
-    A[User]
-    B[Upay-style Interface]
-    C[AI Assist]
-    D[Intent + Context Layer]
-    E[Deterministic Financial Engine]
-    F[Structured Evidence]
-    G[AI Explanation]
-    H[Review & Confirmation]
-    I[Simulated Action]
+| Role | Name |
+|---|---|
+| **Captain** | Hasibul Hasan Rahim |
+| Member | Fuad Al Abid |
+| Member | Abu Zubayer Ahmmed |
 
-    A --> B
-    B --> C
-    C --> D
-    D --> E
-    E --> F
-    F --> G
-    G --> H
-    H --> I
+---
+
+## Problem Statement
+
+MFS users in Bangladesh can perform transactions, but often lack context and guidance about:
+
+- where their money actually goes each month;
+- why their balance changed unexpectedly;
+- how much they can safely spend without affecting upcoming obligations;
+- how long their available balance will last given spending patterns;
+- whether a purchase fits their current financial situation;
+- realistic savings goals they can actually achieve;
+- how to navigate complicated financial workflows with confidence;
+- accessible support when elderly or less digitally confident family members need help.
+
+Existing apps show balances and transaction history. They do not help users understand the story behind the numbers or guide them through confident action.
+
+---
+
+## Proposed Solution
+
+Upay AI Financial Coach acts as an **intelligence and assistance layer** inside an MFS-style experience. The conceptual workflow is:
+
+```
+USER INPUT
+    ↓
+DETERMINISTIC FINANCIAL ANALYTICS
+    ↓
+AI INTERPRETATION / CONVERSATION
+    ↓
+GUIDANCE
+    ↓
+USER CONFIRMATION
+    ↓
+ACTION
 ```
 
-## Product architecture
+AI assists the user at every step, while important financial calculations and controls remain **deterministic** — calculated from actual transaction data, not invented by a language model.
 
-```mermaid
-flowchart LR
-  Home[Existing upay experience] --> Today[Your Money Today]
-  Home --> Assist[AI Assist service tile]
-  Assist --> Understand[Understand]
-  Understand --> Decide[Decide]
-  Decide --> Act[Prepare action]
-  Act --> Confirm[User confirms + PIN]
+### Core Product Philosophy
+
+- **Understand** — Help users see spending patterns, financial pressure, and the story behind their balance.
+- **Plan** — Help users set realistic savings goals and budget targets based on their actual cash flow.
+- **Act** — Help users complete financial workflows through guided conversational interaction.
+- **Confirm** — Every important financial action requires explicit user confirmation before anything is simulated or executed.
+
+---
+
+## Implemented Features
+
+### AI Financial Coach
+- Conversational financial guidance in English, Bangla, and mixed language
+- Intent detection and entity extraction from natural language
+- AI-powered explanations grounded in calculated financial evidence
+- Deterministic fallback when Groq is unavailable
+- Suggested actions based on user's financial context
+
+### Financial Intelligence
+- **Money Pulse** — One clear signal summarizing financial health with inspectable drivers
+- **Money Runway** — Days remaining on current balance at recent spending pace
+- **Safe-to-Spend** — Amount available after committed expenses and safety buffer
+- **Safe-to-Save** — Week-by-week savings feasibility range
+- **Financial Health Score** — Explainable 0–100 score (not a credit score)
+- **Money Story** — Auto-derived events: income, unusual purchases, category changes, recurring payments
+
+### Spending & Transactions
+- Transaction history with category labels
+- Spending breakdown by category (deterministic aggregation)
+- Comparison with previous period (30-day rolling windows)
+- Recurring expense detection
+- Unusual expense signals
+- Category correction feedback (stored for learning)
+
+### Planning & Savings
+- Personalized budget recommendation (not 50/30/20 — based on actual cash flow)
+- Savings goals with contribution plan and deadline feasibility check
+- Cash flow forecasting with timing-aware income cycles
+- Scenario Lab for reversible what-if comparisons (does not mutate account data)
+
+### Intent-to-Action (Send Money)
+- Natural language intent recognition ("Send 500 to Fuad")
+- Server-side recipient resolution with ambiguity detection (never guesses)
+- Relationship context labels (Trusted / Known / Needs verification)
+- Transfer draft with full financial impact preview (balance after, runway change, fee)
+- Explicit confirmation step before PIN entry
+- Demo PIN verification (simulated execution — no real money moves)
+- State machine: DRAFT → REVIEWED → CONFIRMED → PIN_VERIFIED → COMPLETED
+
+### People, Not Numbers
+- Trusted contacts with relationship history
+- Human-readable trust labels instead of opaque scores
+- Guided Mode for calm, larger-step workflows
+- Trusted Helper Mode for assisted access by family members
+
+### Reporting & Learning
+- Weekly and monthly financial reports
+- Behavior-triggered micro-learning lessons
+- Personalized offer recommendations (opt-in, relevance-scoped)
+
+### Accessibility
+- Mobile-responsive fintech UI
+- Sidebar navigation with tooltip mode
+- Guided Mode for users who prefer step-by-step flows
+- Loading, error, and fallback states throughout
+
+---
+
+## Prototype / Partial Features
+
+- AI chat history is session-local (not persisted across sessions)
+- Frontend Bangla translated UI is demonstrated but not fully complete
+- Offer preferences are demonstrated but not yet persisted in a production preference store
+
+---
+
+## Planned / Future Features
+
+- Full Bangla UI translation
+- Persisted chat history
+- Production upay API integration (behind `GovernedUpayTransactionProvider`)
+- PostgreSQL production deployment with managed database
+- Route-splitting for production frontend bundle
+- Full-text search for transactions
+- Push notifications
+
+---
+
+## AI Role — What AI Actually Does
+
+### AI / Groq Layer
+
+Used for:
+
+- Intent interpretation from natural language queries
+- Conversational financial guidance
+- Translating calculated financial evidence into accessible natural language
+- Simplifying complex financial information
+- Generating context-aware suggested actions
+
+### Deterministic Financial Layer
+
+Used for:
+
+- Balance calculations and transaction arithmetic
+- Safe-to-spend and safe-to-save calculations
+- Financial health scoring
+- Savings feasibility computations
+- Budget recommendations based on actual cash flow
+- Transaction validation and state transitions
+- Recipient resolution and relationship classification
+- Cash flow forecasting with observed income timing
+- All confirmation and PIN verification logic
+
+### Why AI Is Needed
+
+The AI component converts **structured financial evidence** and application state into accessible guidance and conversational workflows. The application does **not** rely on an LLM to invent financial facts. AI interprets and explains evidence produced by deterministic systems. The Groq API key is server-side only and optional — a full deterministic fallback always works.
+
+### Financial Safety Boundary
+
+> **AI explains the result; it does not calculate the balance, move money, or access a PIN.**
+
+No AI service participates in transaction execution or PIN verification.
+
+---
+
+## Architecture
+
+```
+┌─────────────────────────────────────────────┐
+│         React + Vite Frontend               │
+│                                              │
+│  Home | AI Assist | Pulse | Transactions |  │
+│  People | Guided Actions | Reports | Goals  │
+└──────────────────────┬──────────────────────┘
+                       │
+                       │ /api/v1
+                       ▼
+┌─────────────────────────────────────────────┐
+│           FastAPI Backend                    │
+│                                              │
+│  Auth │ Services │ Analytics │ AI Coach     │
+└─────────────┬─────────────────┬──────────────┘
+              │                 │
+              ▼                 ▼
+       SQLAlchemy 2         Groq API
+       (SQLite /           (optional
+        PostgreSQL)         fallback exists)
 ```
 
-Mobile navigation stays focused on Pulse, Insights, Plan, and Coach. Transactions, Reports, Learn, and Relevant Savings are secondary destinations. Desktop uses the same hierarchy in a compact shell.
+### Architecture Principles
 
-## Four hero capabilities
+- API-driven, frontend/backend separation
+- Deterministic calculations separate from LLM-generated responses
+- Evidence-first AI: Groq explains, it does not calculate
+- Environment-based configuration via environment variables
+- Synthetic demo data only
+- Human confirmation required for consequential actions
+- PIN verification is application-side only (never sent to AI)
 
-1. **AI Assist** — understands English, Bangla, and mixed-language requests; presents grounded answers and stays useful with a deterministic fallback if Groq is unavailable.
-2. **Safe-to-Spend + Money Runway** — shows an estimated flexible amount after known bills, a savings commitment and reserve, plus a clearly labelled runway projection.
-3. **Intent-to-Action** — resolves a person, builds a financial-context transfer draft, then requires `DRAFT → REVIEWED → CONFIRMED → PIN_VERIFIED → COMPLETED`.
-4. **Guided Mode + People, not numbers** — provides a calmer, larger-step workflow and contact cards with human trust labels rather than opaque scores.
+---
 
-Secondary tools remain available under **Plan**, **Insights**, and **More** so they support the core journey rather than compete with it.
+## Technology Stack
 
-## Features implemented
+| Layer | Technology |
+|---|---|
+| Frontend | React, TypeScript, Vite, Tailwind CSS |
+| Backend | FastAPI |
+| ORM | SQLAlchemy 2 |
+| Local Database | SQLite |
+| Production Database | PostgreSQL (via Docker Compose) |
+| AI | Groq API (`llama-3.3-70b-versatile` or `qwen/qwen3.8-27b`) — optional with deterministic fallback |
+| Authentication | JWT (HMAC-SHA256, demo tokens) |
+| Charts | Recharts |
+| Icons | Lucide React |
+| Testing | pytest |
 
-- Demo login for student, salaried worker and freelancer personas.
-- Upay-style host home with AI Assist as a normal service tile and one compact “Your Money Today” section.
-- Flagship Pulse with API-backed balance, cash flow, Money Pulse, Money Runway, Safe-to-Save, What Changed, upcoming activity, Money Story and recent transactions.
-- Transaction search and authenticated, stored user category correction feedback.
-- History tabs for Transaction Details, Transaction Summary and Smart Insights, plus transaction-level AI context.
-- Deterministic category aggregation, comparison, recurring expense detection and unusual-expense signals.
-- Signature “why did I run out?” evidence calculation before a Groq/fallback explanation.
-- Personalized—not 50/30/20—budget recommendation with accept, customize, reset, validation and explainability.
-- A three-step savings-goal flow with contribution requirement, cash-flow feasibility and scenario-linked alternatives.
-- Timing-aware forecasting: regular income follows its observed monthly cycle; irregular income is conservatively discounted.
-- Scenario Lab with before/after projected balance, safe-to-save change and goal-contribution impact. Scenarios never mutate account data.
-- Explainable 0–100 informational Financial Health Score, explicitly not a credit score.
-- Conversational, task-oriented AI Assist with suggested actions for sending money, affordability, spending changes, saving, runway and trusted people.
-- Server-side recipient resolution with a human-readable relationship label, masked phone number, and an ambiguity response instead of guessing.
-- Simulated transfer review, explicit confirmation and user-entered PIN. The AI never sends money silently.
-- Dense monthly reports, behavior-triggered learning and transaction-derived relevant savings with opt-in control.
-- Mobile-responsive fintech UI with loading/error/fallback states.
+---
 
-## Signature intelligence
+## Repository Structure
 
-- **Money Pulse:** combines spending comparison, upcoming recurring activity, runway and buffer logic into a neutral status with inspectable drivers.
-- **Money Runway:** simulates balance against recent daily spending, observed income timing and a conservative buffer.
-- **Safe-to-Save:** subtracts forecast spending and a safety buffer, caps the result by prorated recent savings capacity, and returns a range rather than false precision.
-- **What Changed:** compares equal rolling 30-day windows and ranks category changes by impact.
-- **Money Story:** derives income, unusual purchase, category-change, recurring-payment and net-cash-flow events.
-- **Scenario Lab:** reuses forecast and goal math for reversible what-if comparisons.
+```
+.
+├── backend/
+│   ├── app/
+│   │   ├── main.py           # FastAPI app + all routes
+│   │   ├── models.py         # SQLAlchemy models
+│   │   ├── schemas.py        # Pydantic request/response schemas
+│   │   ├── db.py             # Database engine + session
+│   │   ├── api/deps.py       # JWT authentication dependency
+│   │   ├── core/config.py    # Environment variable settings
+│   │   └── services/
+│   │       ├── analytics_service.py   # Deterministic financial calculations
+│   │       ├── groq_service.py        # AI explanation with fallback
+│   │       ├── intent_service.py      # Intent detection
+│   │       ├── safe_to_spend_service.py
+│   │       ├── transaction_draft_service.py  # Intent-to-Action state machine
+│   │       ├── recipient_service.py    # Contact resolution
+│   │       ├── relationship_service.py # Relationship classification
+│   │       ├── seed.py         # Synthetic demo data generator
+│   │       └── ...
+│   ├── tests/
+│   │   ├── test_core.py      # Core deterministic tests
+│   │   └── test_api_contracts.py
+│   ├── alembic/              # Database migrations
+│   ├── Dockerfile
+│   ├── docker-compose.yml
+│   └── requirements.txt
+├── frontend/
+│   ├── src/
+│   │   ├── App.tsx          # Main React app + routing
+│   │   ├── pages.tsx        # Page components
+│   │   ├── api/client.ts    # API client
+│   │   ├── components/
+│   │   │   ├── coach/       # CoachPanel, PIN modal, coach components
+│   │   │   ├── people/      # People/contacts pages
+│   │   │   └── ui.tsx       # Shared UI components
+│   │   ├── styles.css       # Tailwind + custom CSS
+│   │   └── ...
+│   ├── package.json
+│   ├── vite.config.ts
+│   └── ...
+├── docs/
+│   ├── architecture.md
+│   ├── api.md
+│   ├── privacy.md
+│   ├── ai-design.md
+│   ├── evaluation.md
+│   └── data-sources.md
+├── .env.example
+├── .gitignore
+├── vercel.json
+├── docker-compose.yml
+├── README.md
+└── CLAUDE.md
+```
 
-## Deterministic engine vs AI layer
+---
 
-The deterministic backend handles balances, transaction totals, category comparisons, recurring costs, Safe-to-Spend, savings feasibility, runway, scenarios, recipient records and transaction state. AI Assist only interprets natural language, extracts an intent/entities, explains provided evidence, and asks for clarification when needed. Groq only translates precomputed structured evidence into respectful, concise explanations and never receives database credentials or raw schema dumps. A deterministic response is returned on absent/failed Groq calls.
+## Requirements
 
-The UI’s concise disclosure is intentional: **AI explains the result; it does not calculate the balance, move money, or access a PIN.**
+| Requirement | Version | Notes |
+|---|---|---|
+| Python | 3.11+ | Backend |
+| Node.js | 20+ | Frontend |
+| npm | 10+ | Package manager |
+| Git | any recent | Version control |
+| PostgreSQL | 16 | Production only |
+| Docker | latest | Optional for PostgreSQL |
+| Groq API key | — | Optional; fallback always works |
 
-## Stack
+---
 
-React, TypeScript, Vite, Recharts, Lucide; Python, FastAPI, SQLAlchemy 2, Pydantic, PostgreSQL-compatible configuration, NumPy; optional Groq REST integration. The local quick-start defaults to SQLite for judge reliability; Docker Compose provisions PostgreSQL.
+## Environment Variables
 
-## Data and models
+| Variable | Required | Default | Description |
+|---|---|---|---|
+| `DATABASE_URL` | No (dev) | `sqlite:///./upay_demo.sqlite3` | PostgreSQL or SQLite connection string |
+| `GROQ_API_KEY` | Optional | _(empty)_ | Groq API key for live AI explanations |
+| `GROQ_MODEL` | No | `llama-3.3-70b-versatile` | Groq model name |
+| `JWT_SECRET_KEY` | Production | `demo-only-change-me` | Secret for JWT signing; **must change in production** |
+| `FRONTEND_URL` | No (dev) | `http://localhost:5173` | CORS allowlist origin |
+| `ENVIRONMENT` | No | `development` | `development` or `production` |
 
-The synthetic generator uses a fixed seed and realistic high-level patterns: salary/irregular income cycles, utility/subscription recurrences, transport, food, groceries, weekend variation and deliberate student month-end pressure. No actual upay information is used or implied. Current seed data contains four demo users and roughly 90 days of activity each; the generator can be scaled for offline experiments.
+> Never put secret values in `.env` files that are committed to version control. Use `.env.example` as a template.
 
-Public dataset research is in [docs/data-sources.md](docs/data-sources.md). PaySim is recorded as a reviewed reference only—not downloaded or redistributed—because third-party distribution terms must be reconfirmed. The complete data policy is in [data/README.md](data/README.md).
+---
 
-Core tables: `users`, `accounts`, `transactions`, `budgets`, `savings_goals`, `notifications`, and `category_feedback`. The normalized schema is deliberately compact for the working demo; adapter-ready services leave room for merchant/profile/conversation/offer-preference tables in a governed integration.
+## Installation & Setup
 
-## Run locally
+### 1. Clone the Repository
 
-Prerequisites: Python 3.11+ and Node 20+. PostgreSQL is optional for the quick demo.
+```bash
+git clone https://github.com/Rah1m-Hasan/AI_Dev_fest.git
+cd AI_Dev_fest
+```
+
+### 2. Backend Setup
 
 ```bash
 cd backend
+
+# Create virtual environment
 python -m venv .venv
-source .venv/bin/activate
+source .venv/bin/activate      # Linux/macOS
+# .\.venv\Scripts\Activate.ps1  # Windows PowerShell
+
+# Install dependencies
 pip install -r requirements.txt
-cp .env.example .env   # leave DATABASE_URL empty/SQLite default for quick demo, or set PostgreSQL
-uvicorn app.main:app --reload --port 8000
+
+# Configure environment
+cp .env.example .env
+# Edit .env and add GROQ_API_KEY if you have one (optional)
 ```
 
-In another terminal:
+### 3. Frontend Setup
 
 ```bash
 cd frontend
+
+# Install dependencies
 npm install
+
+# Configure environment
 cp .env.example .env
+```
+
+---
+
+## Running Locally
+
+### Start the Backend
+
+```bash
+cd backend
+source .venv/bin/activate
+uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+```
+
+- API running at: http://localhost:8000
+- Swagger docs at: http://localhost:8000/docs
+
+### Start the Frontend
+
+```bash
+cd frontend
 npm run dev
 ```
 
-Open `http://localhost:5173`; FastAPI OpenAPI is `http://localhost:8000/docs`. Vite proxies `/api` to the backend in development, so embedded previews do not call a hard-coded browser-side API localhost address.
+- Frontend at: http://localhost:5173
 
-For PostgreSQL:
-
-```bash
-docker compose up db -d
-export DATABASE_URL='postgresql+psycopg://upay:upay@localhost:5432/upay_coach'
-cd backend && uvicorn app.main:app --reload --port 8000
-```
-
-The lifespan bootstrap creates the schema and seeds deterministic data. An initial Alembic migration artifact is provided in `backend/alembic`; production should expand its generated operations and run it in CI rather than relying on the demo bootstrap.
-
-## Environment
-
-| Variable | Required | Purpose |
-|---|---|---|
-| `DATABASE_URL` | No for quick demo | PostgreSQL SQLAlchemy URL; SQLite fallback is local only |
-| `GROQ_API_KEY` | No | Server-side only optional explanation API key |
-| `GROQ_MODEL` | No | Groq model name |
-| `JWT_SECRET_KEY` | Yes outside demo | Token signing secret |
-| `FRONTEND_URL` | Yes outside demo | CORS allowlist source |
-| `ENVIRONMENT` | No | Deployment mode marker |
-
-Never put a server secret in `VITE_*` frontend variables or commit `.env`.
-
-## Test and build
-
-```bash
-cd backend && pytest -q tests/test_core.py
-cd backend && python -m compileall -q app
-cd frontend && npm run lint
-cd frontend && npm run test
-cd frontend && npm run build
-```
-
-`npm run test` intentionally aliases the TypeScript typecheck; Vitest is not installed, so this project does not claim a passing browser unit-test suite. Browser behavior is verified against the running app at the documented mobile, tablet and desktop viewports.
-
-The portable core suite covers authentication, calculated analytics, Safe-to-Save reconciliation/capping, budget JSON persistence, goal math, forecasting, health-score bounds and scenario non-mutation. On the current Python 3.14 environment it passes **9 tests**. The retained async API contract suite is skipped on Python 3.14 because the installed Starlette/AnyIO in-process transport can deadlock; run it normally on Python 3.11–3.13. On Python 3.14, start Uvicorn and use live authenticated HTTP checks as the contract evidence. The final live sweep verifies all three profiles across dashboard, intelligence, spending, transactions, budgets, goals, forecast, health, reports, learning, offers, Coach and all four scenario types.
-
-## Demo accounts
+### Demo Login Credentials
 
 All demo accounts use password: `password`
 
-| Email | Persona | Description |
-|-------|---------|-------------|
-| `demo.student@upay.local` | Student (Arif) | Rising food/transport pressure, month-end balance challenges |
-| `demo.salary@upay.local` | Salaried Worker (Nadia) | Regular salary cycle, stable expenses |
-| `demo.freelancer@upay.local` | Freelancer (Samiha) | Variable income, irregular cash flow |
-| `demo.business@upay.local` | Business Owner (Rafi) | Small business owner, higher transaction volume |
+| Email | Persona |
+|---|---|
+| `demo.student@upay.local` | Arif (Student) — month-end pressure |
+| `demo.salary@upay.local` | Nadia (Salaried) — stable income |
+| `demo.freelancer@upay.local` | Samiha (Freelancer) — variable income |
 
-## API surface
+---
 
-All API routes are under `/api/v1`. Key groups are `auth`, `dashboard`, `transactions`, `analytics`, `coach`, `budgets`, `goals`, `forecast`, `financial-health`, `reports`, `alerts`, `learning`, `offers`, plus `health` and `system/status`. See [docs/api.md](docs/api.md) and `/docs` for executable schemas.
+## Running with PostgreSQL (Production Path)
 
-## Responsible AI, privacy and security
+```bash
+# Start PostgreSQL with Docker
+docker compose up db -d
 
-All figures are marked as historical calculated values, forecasts, or AI/fallback explanations. Important output includes supporting evidence and optional actions. User control is explicit: budgets/goals are saved only by user request; offers are relevance-scoped; category corrections are feedback. Inputs are validated, ORM queries are parameterized, JWT guards every personal endpoint, chat length is capped, CORS is explicit, and Groq failures use a bounded timeout/fallback. More: [docs/privacy.md](docs/privacy.md), [docs/ai-design.md](docs/ai-design.md).
+# Run backend with PostgreSQL
+export DATABASE_URL='postgresql+psycopg://upay:upay@localhost:5432/upay_coach'
+cd backend && uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+```
 
-## Prototype validation and limitations
+---
 
-See [docs/evaluation.md](docs/evaluation.md) for metrics and the no-invented-results policy. Validation is currently **deterministic scenario tests**, including intent/entity extraction, recipient resolution, Safe-to-Spend reconciliation, invalid transaction-state rejection, and no direct `DRAFT → COMPLETED` transition. Product evaluation should measure intent classification, recipient/amount extraction, ambiguity detection, key-flow completion, normal vs Guided Mode steps, and time-to-answer; no real-user percentages are claimed.
+## Build Commands
 
-This is a synthetic, seed-data prototype: forecast accuracy is not validated against real customers; the frontend does not yet include a full Bangla translated UI; chat history is session-local; offer preferences are demonstrated but not persisted in a production preference store; and production migrations, gateway rate limiting and audit controls remain deployment work. The frontend bundle should be route-split before production delivery.
+### Frontend Production Build
 
-## Future controlled upay integration
+```bash
+cd frontend
+npm run build
+```
 
-A future `GovernedUpayTransactionProvider` would replace the current `SyntheticTransactionProvider` behind the same analytics boundary only after user consent, data-minimization/governance approval, anonymization where appropriate, API access, threat modeling and security review. The intelligence services, evidence contracts and human-control boundaries remain provider-independent. It must remain a user-assistance product, not a consequential decision engine.
+Output is in `frontend/dist/`.
 
-## Recommended 2-minute judging flow
+### Backend Validation
 
-1. Select **Arif · Student** and stay on the familiar upay-style Home. Point out the normal **AI Assist** tile and the three “Your Money Today” answers.
-2. Open **AI Assist** and ask: “Why am I running short this month?” Show the calculated food/transport evidence and concise explanation.
-3. Ask: “Rafi ke 2000 taka pathabo.” AI Assist resolves **Rafi Ahmed**, shows his relationship/trust context, balance after, Safe-to-Spend impact and estimated runway change.
-4. Tap **Review transfer**, then **Confirm**. Show that neither action has moved money yet.
-5. Enter the simulated PIN yourself, show the success message and return Home to show the updated balance/Safe-to-Spend.
-6. If time allows, open **Guided Mode** or **People, not numbers** to show the accessibility and safety layer.
+```bash
+cd backend
+python -m compileall -q app
+```
 
-An optional in-product Demo Tour introduces the same product logic without forcing it on every session.
+---
 
-## Team and disclosure
+## API Reference
 
-**Team:** Hasib (Team Leader)
+**Base URL:** `/api/v1`
 
-**External Libraries/Services:**
-- Backend: FastAPI, SQLAlchemy 2, Pydantic, Python-Jose, Passlib
-- Frontend: React, TypeScript, Vite, Tailwind CSS, Recharts, Lucide
-- AI: Groq API (qwen/qwen3.8-27b model) - optional, falls back to deterministic
-- Database: SQLite (local dev) / PostgreSQL (production)
-- Docker: PostgreSQL 16 Alpine
+### Health
 
-**Public Dataset Research Disclosure:** PaySim mobile-money simulator was reviewed as a reference but not used. See [docs/data-sources.md](docs/data-sources.md) for full details.
+```
+GET /api/v1/health
+```
 
-**Live URL:** _to be deployed_
+### Authentication
 
-**Screenshots:** _add from the running demo before submission_
+```
+POST /api/v1/auth/login
+GET  /api/v1/auth/me
+```
 
-## Hackathon Compliance
+### Dashboard
 
-- **Theme:** upay AI Financial Coach Challenge
-- **All data is synthetic** — no real upay API, no real user data
-- **No real money transfers** — all transactions are simulated
-- **AI explains calculated results** — does not calculate balances or move funds
-- **User always confirms** — PIN verification required for any action
-- **Privacy-first** — minimal data collection, synthetic demo only
+```
+GET /api/v1/dashboard/summary
+```
+
+### Transactions
+
+```
+GET /api/v1/transactions
+GET /api/v1/transactions/{id}
+GET /api/v1/transactions/categories
+GET /api/v1/transactions/summary
+PATCH /api/v1/transactions/{id}/category
+POST /api/v1/transactions/check-impact
+```
+
+### Analytics
+
+```
+GET /api/v1/analytics/spending
+GET /api/v1/analytics/cashflow
+GET /api/v1/analytics/merchants
+GET /api/v1/analytics/recurring
+GET /api/v1/analytics/comparison
+```
+
+### AI Coach
+
+```
+POST /api/v1/coach/chat
+POST /api/v1/coach/run-out-analysis
+GET  /api/v1/coach/insights
+POST /api/v1/coach/parse-intent
+GET  /api/v1/coach/safe-to-spend
+GET  /api/v1/coach/income-adaptive
+```
+
+### Intent-to-Action (Send Money)
+
+```
+POST /api/v1/transactions/draft
+GET  /api/v1/transactions/draft/active
+POST /api/v1/transactions/draft/{id}/review
+POST /api/v1/transactions/draft/{id}/confirm
+POST /api/v1/transactions/draft/{id}/execute   # requires PIN
+DELETE /api/v1/transactions/draft/{id}
+```
+
+### Recipients
+
+```
+GET  /api/v1/recipients/search?q=
+GET  /api/v1/recipients/resolve?q=
+GET  /api/v1/trusted-contacts
+POST /api/v1/trusted-contacts
+DELETE /api/v1/trusted-contacts/{id}
+```
+
+### Budgets & Goals
+
+```
+GET  /api/v1/budgets/recommendation
+GET  /api/v1/budgets/current
+POST /api/v1/budgets
+PUT  /api/v1/budgets/{id}
+GET  /api/v1/goals
+POST /api/v1/goals
+GET  /api/v1/goals/{id}
+GET  /api/v1/goals/{id}/plan
+```
+
+### Forecast & Financial Health
+
+```
+GET /api/v1/forecast/cashflow
+GET /api/v1/forecast/upcoming-expenses
+GET /api/v1/financial-health
+GET /api/v1/financial-health/history
+```
+
+### Reports & Alerts
+
+```
+GET /api/v1/reports/weekly
+GET /api/v1/reports/monthly
+GET /api/v1/alerts
+PATCH /api/v1/alerts/{id}/read
+```
+
+### Learning & Offers
+
+```
+GET  /api/v1/learning/recommended
+POST /api/v1/learning/{id}/complete
+GET  /api/v1/offers/recommended
+PATCH /api/v1/offers/preferences
+```
+
+### Scenarios
+
+```
+POST /api/v1/scenarios/simulate
+```
+
+### Trusted Helpers
+
+```
+GET  /api/v1/trusted-helpers
+POST /api/v1/trusted-helpers
+DELETE /api/v1/trusted-helpers/{id}
+POST /api/v1/trusted-helper/request
+```
+
+Full OpenAPI schema available at `/docs`.
+
+---
+
+## Important User Flows
+
+### Financial Insight Flow
+
+1. User opens AI Assist
+2. Asks: "Why am I running short this month?"
+3. System retrieves calculated spending evidence (deterministic)
+4. AI explains the patterns in natural language
+5. Suggested actions are displayed
+
+### Safe-to-Spend Flow
+
+1. User asks: "Can I safely spend ৳5,000?"
+2. System calculates available funds after upcoming obligations
+3. AI explains the result with evidence breakdown
+4. User decides based on transparent information
+
+### Intent-to-Action Flow (Send Money)
+
+1. User: "Send ৳500 to Fuad"
+2. AI Coach parses intent and identifies recipient
+3. Transfer draft is prepared with full impact preview:
+   - Balance after transfer
+   - Safe-to-spend impact
+   - Money runway change
+   - Transfer fee
+4. User reviews the summary
+5. User explicitly confirms
+6. User enters demo PIN (`1234`)
+7. Simulated transfer executes (no real money moves)
+
+---
+
+## Security and Financial Safety
+
+- **No credentials committed to Git** — all secrets via environment variables
+- **Synthetic data only** — no production upay customer information
+- **Deterministic financial calculations** — AI explains results, does not calculate balances
+- **No unrestricted LLM control** — Groq receives structured evidence only, never database credentials
+- **Confirmation-gated actions** — every consequential step requires user confirmation
+- **PIN never sent to AI** — verification is application-side only
+- **JWT authentication** on all personal endpoints
+- **CORS restricted** to configured frontend origin
+- **Production requires:** HTTPS, secure secret management, PostgreSQL, rate limiting
+
+---
+
+## Responsible AI
+
+### Privacy
+All data is synthetic demo data. No real user information is collected or processed.
+
+### Explainability
+Financial responses are based on visible calculated evidence. Users can inspect what drove each insight.
+
+### Human Oversight
+Consequential actions (send money, budget creation, goal changes) require explicit user confirmation.
+
+### Transparency
+Every response clearly distinguishes:
+- Deterministic calculations (from actual transaction data)
+- AI-generated explanations (from Groq)
+- Scenario projections (labeled as estimates, not guarantees)
+
+### No Autonomous Financial Decisions
+The prototype never autonomously approves or denies lending, or makes consequential financial decisions on behalf of the user.
+
+---
+
+## Synthetic Data Policy
+
+All demonstration customer, transaction, spending, savings, contact, and financial data used by this prototype is **synthetic** — self-generated for hackathon demonstration purposes.
+
+**No production upay customer data or personally identifiable production customer information is used.**
+
+Synthetic data is generated by `backend/app/services/seed.py` using a fixed seed, producing realistic patterns:
+- Salary/irregular income cycles
+- Utility and subscription recurrences
+- Transport and food spending
+- Weekend spending variation
+- Deliberate student month-end pressure
+
+Current seed data contains four demo users and approximately 90 days of activity each.
+
+---
+
+## External Services and Components
+
+| Service | Purpose | Type |
+|---|---|---|
+| **Groq API** | AI explanation and conversation | External API (optional) |
+| **React** | UI framework | Open source |
+| **Vite** | Build tool | Open source |
+| **FastAPI** | Backend framework | Open source |
+| **SQLAlchemy 2** | ORM | Open source |
+| **Tailwind CSS** | Styling | Open source |
+| **Recharts** | Charts | Open source |
+| **Lucide React** | Icons | Open source |
+| **PostgreSQL** | Production database | Open source |
+| **Docker** | Containerization | Open source |
+
+No third-party datasets, templates, or assets are used in this prototype.
+
+---
+
+## Testing
+
+### Backend Tests
+
+```bash
+cd backend
+python -m pytest tests/test_core.py -q
+```
+
+Current result: **14 tests passing**
+
+### Frontend Type Check
+
+```bash
+cd frontend
+npm run typecheck
+```
+
+### Frontend Build
+
+```bash
+cd frontend
+npm run build
+```
+
+---
+
+## Manual Verification Checklist
+
+- [ ] Frontend opens at http://localhost:5173
+- [ ] Demo login works for all three personas
+- [ ] Synthetic balance and transactions load on dashboard
+- [ ] AI Assist opens and responds to questions
+- [ ] Money Pulse, Money Runway, and Safe-to-Spend display correctly
+- [ ] Spending breakdown chart renders
+- [ ] Transaction history loads with categories
+- [ ] Budget recommendation displays
+- [ ] Savings goals can be created
+- [ ] Send Money flow works end-to-end:
+  - [ ] Intent parsing identifies recipient and amount
+  - [ ] Draft summary shows balance after, runway impact, fee
+  - [ ] Confirmation screen appears before PIN
+  - [ ] Demo PIN (`1234`) executes simulated transfer
+- [ ] Health endpoint returns `{"status": "ok"}`
+- [ ] `/docs` API documentation loads
+
+---
+
+## Recommended Demo Flow (2–3 minutes)
+
+1. **Open dashboard** — show the familiar upay-style home with AI Assist tile
+2. **Show Money Today** — highlight Safe-to-Spend and Money Runway
+3. **Open AI Assist** — ask: "Why am I running short this month?"
+4. **Show evidence-based explanation** — highlight that AI explains calculated data
+5. **Test Send Money** — ask: "Send ৳500 to Fuad"
+6. **Show Intent-to-Action** — reveal draft summary with full financial impact
+7. **Confirm and enter PIN** — show `1234`, demonstrate simulated execution
+8. **Return to home** — show updated balance and Safe-to-Spend
+9. **Optional** — open Guided Mode or Trusted People to show safety/accessibility layers
+
+---
+
+## Live Deployment
+
+```
+Live URL: [TO BE ADDED AFTER VERCEL DEPLOYMENT]
+```
+
+### Planned Production Architecture
+
+```
+Browser
+   │
+   ▼
+Vercel
+   │
+   ├── React/Vite Frontend (static hosting)
+   │
+   └── FastAPI Backend (serverless or container)
+            │
+            ├── PostgreSQL (managed database)
+            │
+            └── Groq API (AI explanations)
+```
+
+### Required Deployment Environment Variables
+
+| Variable | Description |
+|---|---|
+| `DATABASE_URL` | PostgreSQL connection string |
+| `GROQ_API_KEY` | Groq API key |
+| `JWT_SECRET_KEY` | Secure random secret for JWT signing |
+| `FRONTEND_URL` | Deployed frontend URL for CORS |
+| `ENVIRONMENT` | `production` |
+
+---
+
+## Local vs Production
+
+| Environment | Database | AI | Authentication |
+|---|---|---|---|
+| Local | SQLite | Deterministic fallback | Demo JWT |
+| Production | PostgreSQL | Groq (optional) | Secure JWT + secrets |
+
+SQLite is intended only for local/demo development. Production uses PostgreSQL via the provided Docker Compose configuration.
+
+---
+
+## Limitations
+
+- **Synthetic data only** — all financial figures are from demo data, not real accounts
+- **Hackathon prototype** — not a production-ready application
+- **No production upay API** — demonstrates concepts with synthetic data
+- **Simulated transactions** — no real money is transferred
+- **AI depends on Groq availability** — falls back to deterministic responses when unavailable
+- **Session-local chat history** — not persisted across browser sessions
+- **Production compliance and security work remains** — see Future Production Path
+
+---
+
+## Future Production Path
+
+1. Governed integration with production MFS systems
+2. Production-grade authentication (OIDC/JWT with proper secret management)
+3. Secure transaction service integration
+4. Regulated approval and risk controls
+5. Scalable PostgreSQL infrastructure (managed database)
+6. Logging, monitoring, and observability
+7. Controlled model evaluation process
+8. Security review and penetration testing
+9. Privacy and compliance review (BDPA/local regulations)
+10. Staged pilot with real users
+
+---
+
+## Hackathon Alignment
+
+**Main Track:** Customer Innovation & Financial Independence
+
+The prototype addresses this through:
+
+- **Financial coaching** — AI-powered explanations of spending and cash flow
+- **Savings guidance** — realistic goal-setting based on actual capacity
+- **Spending intelligence** — Money Pulse, Safe-to-Spend, and category breakdown
+- **Cash-flow awareness** — Runway forecasting and upcoming expense visibility
+- **Financial confidence** — guided workflows that explain every step
+- **Inclusive conversational UX** — supports Bangla, English, and mixed input; Guided Mode for accessibility
+
+---
+
+## Evaluation Alignment
+
+Without predicting scores, the repository demonstrates:
+
+| Criterion | How Addressed |
+|---|---|
+| **Problem Relevance** | Real MFS customer friction in financial understanding and action confidence |
+| **AI/ML Depth** | AI integrated into interpretation, intent handling, and natural-language assistance; financial calculations remain deterministic |
+| **Customer Impact** | Designed to improve financial understanding and reduce anxiety around money management |
+| **Prototype Quality** | Working end-to-end product flows with confirmation gates and safety boundaries |
+| **Innovation** | Conversational Intent-to-Action with explicit state machine and human confirmation |
+| **Scalability** | API-based architecture with PostgreSQL production path and Docker Compose |
+| **Responsible AI** | Synthetic data, explainability, confirmation requirements, separation of AI from deterministic accounting |
+
+---
+
+## Contributing
+
+This is a hackathon project. Contributions are limited to the registered team members.
+
+---
+
+## License
+
+This project is a hackathon concept prototype. All rights reserved. Not for commercial use.
+
+---
+
+**DIU CPC × upay AI Hackathon / AI DEV FEST 2026**
