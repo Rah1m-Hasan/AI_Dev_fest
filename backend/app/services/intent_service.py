@@ -49,7 +49,12 @@ SPENDING_ANALYSIS_PATTERNS = [
     r"eto.*(khoroch|taka)", r"কেন.*(খরচ|টাকা)", r"where.*money",
 ]
 
-SAVINGS_PATTERNS = [r"help me save", r"emergency fund", r"save for", r"সেভ", r"জমানো"]
+SAVINGS_PATTERNS = [
+    r"help me save", r"emergency fund", r"save for", r"সেভ", r"জমানো",
+    r"buy a laptop", r"laptop", r"phone", r"কেনার", r"কিনতে চাই",
+    r"saving goal", r"save up", r"save money", r"want to save",
+    r"how much to save", r"৳[\d,]+.*months?", r"months.*৳",
+]
 
 HISTORY_PATTERNS = [
     r"history", r"transaction", r"লেনদেন", r"ট্রানজাকশন", r"transection",
@@ -57,8 +62,8 @@ HISTORY_PATTERNS = [
 ]
 
 RECIPIENT_LOOKUP_PATTERNS = [
-    r"who", r"কে", r"রাফি", r"মিম", r"রহমান", r"কাকে", r"কার",
-    r"যাকে", r"তাকে", r"contact", r"পরিচিত", r"নম্বর", r"phone",
+    r"who", r"কে", r"কাকে", r"কার",
+    r"যাকে", r"তাকে", r"বাকে", r"পরিচিত", r"নম্বর", r"phone",
 ]
 
 MOBILE_RECHARGE_PATTERNS = [
@@ -139,7 +144,11 @@ def _extract_recipient_query(text: str) -> str | None:
     for pattern in patterns:
         match = re.search(pattern, text, re.IGNORECASE)
         if match:
-            return match.group(1).strip()
+            candidate = match.group(1).strip().lower()
+            # Filter out generic/money-related words that are not recipients
+            invalid = {"money", "taka", "tk", "amount", "some", "payment", "send", "pay", "to"}
+            if candidate not in invalid and not candidate.isdigit():
+                return match.group(1).strip()
     return None
 
 
@@ -177,11 +186,12 @@ def _classify_intent(text: str) -> tuple[str, float]:
     if send_trigger:
         return "send_money", 0.90
 
-    if any(re.search(p, text_lower) for p in BALANCE_PATTERNS):
-        return "check_balance", 0.88
-
+    # Check safe-to-spend BEFORE balance - "how much can I safely spend" has both
     if any(re.search(p, text_lower) for p in SAFE_TO_SPEND_PATTERNS):
         return "safe_to_spend", 0.85
+
+    if any(re.search(p, text_lower) for p in BALANCE_PATTERNS):
+        return "check_balance", 0.88
 
     if any(re.search(p, text_lower) for p in HISTORY_PATTERNS):
         return "transaction_history", 0.85

@@ -75,12 +75,12 @@ export function PinConfirmationModal({ onConfirm, onCancel, error, recipient, am
           )}
 
           <div className="pin-modal__actions">
-            <button type="button" className="button button--ghost" onClick={onCancel}>
+            <button type="button" className="button button--secondary pin-modal__cancel" onClick={onCancel}>
               Cancel
             </button>
             <button
               type="submit"
-              className="button"
+              className="button pin-modal__confirm"
               disabled={pin.length !== 4 || busy}
             >
               {busy ? 'Confirming…' : 'Confirm transfer'}

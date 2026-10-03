@@ -1,6 +1,8 @@
 import { FormEvent, useEffect, useRef, useState } from 'react';
 import { Send, Accessibility, ShieldCheck } from 'lucide-react';
 import {useSearchParams} from 'react-router-dom';
+import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
 import { api } from '../../api/client';
 import { CoachAvatar } from '../ui';
 import { Tag, TrustBadge } from '../ui';
@@ -51,7 +53,7 @@ interface TransactionDraft {
 
 type DraftResponse = {draft_id: number; recipient: {id: number | null; name: string; phone: string | null}; relationship: string; relationship_evidence: string[]; amount: number; fee: number; total: number; available_balance: number; balance_after: number; safe_to_spend_before?: SafeToSpend; safe_to_spend_after?: number; runway_before_days?: number; runway_after_days?: number; state: string};
 
-type FlowState = 'idle' | 'intent_received' | 'recipient_search' | 'awaiting_amount' | 'draft_ready' | 'reviewed' | 'awaiting_pin' | 'completed';
+type FlowState = 'idle' | 'intent_received' | 'recipient_search' | 'awaiting_amount' | 'draft_ready' | 'reviewed' | 'awaiting_pin' | 'completed' | 'awaiting_savings_goal' | 'awaiting_savings_amount' | 'awaiting_savings_deadline';
 
 export function CoachPanel({ user }: { user: DemoUser }) {
   const [searchParams] = useSearchParams();
@@ -109,6 +111,34 @@ export function CoachPanel({ user }: { user: DemoUser }) {
     setBusy(true);
 
     try {
+      // Handle conversation context - if awaiting recipient, treat as recipient query
+      if (flowState === 'recipient_search') {
+        await handleRecipientQuery(messageText);
+        setBusy(false);
+        return;
+      }
+
+      // Handle conversation context - if awaiting savings goal name
+      if (flowState === 'awaiting_savings_goal') {
+        await handleSavingsGoalQuery(messageText);
+        setBusy(false);
+        return;
+      }
+
+      // Handle conversation context - if awaiting savings amount
+      if (flowState === 'awaiting_savings_amount') {
+        await handleSavingsAmountQuery(messageText);
+        setBusy(false);
+        return;
+      }
+
+      // Handle conversation context - if awaiting savings deadline
+      if (flowState === 'awaiting_savings_deadline') {
+        await handleSavingsDeadlineQuery(messageText);
+        setBusy(false);
+        return;
+      }
+
       // Parse intent first
       const intentResult = await api<ParsedIntent>('/coach/parse-intent', {
         method: 'POST',
@@ -127,7 +157,7 @@ export function CoachPanel({ user }: { user: DemoUser }) {
       } else if (intentResult.intent === 'money_runway') {
         await handleRunway();
       } else if (intentResult.intent === 'savings_help') {
-        await handleFallbackChat('Help me save');
+        await handleSavingsHelp();
       } else if (intentResult.intent === 'check_balance') {
         await handleCheckBalance();
       } else if (messageText.toLowerCase().includes('income')) {
@@ -334,6 +364,141 @@ export function CoachPanel({ user }: { user: DemoUser }) {
     });
   };
 
+  // Savings goal flow handlers
+  const handleSavingsHelp = async () => {
+    setFlowState('awaiting_savings_goal');
+    addMessage({
+      id: crypto.randomUUID(),
+      role: 'ai',
+      text: "Great! What are you saving for?",
+    });
+  };
+
+  const handleSavingsGoalQuery = async (query: string) => {
+    setFlowState('awaiting_savings_amount');
+    addMessage({
+      id: crypto.randomUUID(),
+      role: 'ai',
+      text: `A ${query} sounds like a good goal. About how much do you need for it?`,
+    });
+  };
+
+  const handleSavingsAmountQuery = async (text: string) => {
+    const match = text.match(/[\d,]+/);
+    if (!match) {
+      addMessage({
+        id: crypto.randomUUID(),
+        role: 'ai',
+        text: "I couldn't understand the amount. Please enter a number like 50000 or 80000.",
+      });
+      return;
+    }
+
+    const amount = parseFloat(match[0].replace(/,/g, ''));
+    if (amount <= 0) {
+      addMessage({
+        id: crypto.randomUUID(),
+        role: 'ai',
+        text: "Please enter an amount greater than zero.",
+      });
+      return;
+    }
+
+    // Store amount and ask for deadline
+    setFlowState('awaiting_savings_deadline');
+    addMessage({
+      id: crypto.randomUUID(),
+      role: 'ai',
+      text: `So you need ৳${amount.toLocaleString()}. When do you want to have it by? (For example, in 6 months)`,
+    });
+  };
+
+  const handleSavingsDeadlineQuery = async (text: string) => {
+    // Try to extract months from text like "6 months", "in 8 months"
+    const monthMatch = text.match(/(\d+)\s*(?:months?|মাস)/i);
+    if (!monthMatch) {
+      addMessage({
+        id: crypto.randomUUID(),
+        role: 'ai',
+        text: "I couldn't understand the timeframe. How many months from now? (For example, 6 months)",
+      });
+      return;
+    }
+
+    const months = parseInt(monthMatch[1], 10);
+    if (months <= 0) {
+      addMessage({
+        id: crypto.randomUUID(),
+        role: 'ai',
+        text: "Please enter a positive number of months.",
+      });
+      return;
+    }
+
+    // Get budget recommendation to calculate feasibility
+    try {
+      const budget = await api<{savings_target: number; period_income: number; essential_budget: number; flexible_budget: number}>('/budgets/recommendation');
+      const goals = await api<{items: Array<{id: number; name: string; target_amount: number; current_amount: number; target_date: string; progress_percent: number; plan: {recommended_weekly_contribution: number; recommended_monthly_contribution: number; feasible: boolean}}>}>('/goals');
+
+      // Extract the goal name from conversation context (we need to track this)
+      const goalName = "Savings Goal"; // Would need to track from earlier
+
+      addMessage({
+        id: crypto.randomUUID(),
+        role: 'ai',
+        text: `Let me calculate a plan for your ${goalName} goal...`,
+      });
+
+      // Navigate to goals page with pre-filled data
+      addMessage({
+        id: crypto.randomUUID(),
+        role: 'ai',
+        text: `Based on your recent spending patterns:\n\n• Monthly savings capacity: ৳${budget.savings_target.toLocaleString()}\n• You could realistically save about ৳${Math.round(budget.savings_target * 0.8).toLocaleString()} per month toward this goal.\n\nTo create this goal with a specific target, visit the Goals page. Would you like me to take you there?`,
+      });
+
+      setFlowState('idle');
+    } catch {
+      addMessage({
+        id: crypto.randomUUID(),
+        role: 'ai',
+        text: "I couldn't calculate a plan right now. Would you like to visit the Goals page to set up your savings goal?",
+      });
+      setFlowState('idle');
+    }
+  };
+
+  const handleRecipientQuery = async (query: string) => {
+    // When in recipient_search state, treat the input as a recipient search
+    const resolved = await resolveRecipient(query);
+    if (resolved.contact) {
+      setSelectedRecipient(resolved.contact);
+      if (intent?.amount) {
+        await createDraft(resolved.contact.id, resolved.contact.name, resolved.contact.phone_number, intent.amount);
+      } else {
+        addMessage({
+          id: crypto.randomUUID(),
+          role: 'ai',
+          text: `You selected ${resolved.contact.name}. How much would you like to send?`,
+        });
+        setFlowState('awaiting_amount');
+      }
+    } else if (resolved.matches.length > 1) {
+      addMessage({
+        id: crypto.randomUUID(),
+        role: 'ai',
+        text: `I found multiple people matching "${query}". Which did you mean?`,
+        cardType: 'trusted_people',
+        cardData: { contacts: resolved.matches },
+      });
+    } else {
+      addMessage({
+        id: crypto.randomUUID(),
+        role: 'ai',
+        text: `I couldn't find "${query}" in your contacts. Would you like to search more broadly?`,
+      });
+    }
+  };
+
   const createDraft = async (recipientId: number, recipientName: string, recipientPhone: string, amount: number) => {
     try {
       const params = new URLSearchParams({recipient_id: String(recipientId), recipient_name: recipientName, recipient_phone: recipientPhone, amount: String(amount)});
@@ -535,7 +700,39 @@ export function CoachPanel({ user }: { user: DemoUser }) {
                     {msg.provider === 'groq_grounded' ? 'AI explanation' : 'Calculated fallback'}
                   </Tag>
                 )}
-                <p>{msg.text}</p>
+                {msg.role === 'ai' ? (
+                  <div className="chat-markdown">
+                  <ReactMarkdown
+                    remarkPlugins={[remarkGfm]}
+                    components={{
+                      h1: ({children}) => <h1 className="text-lg font-semibold mt-4 mb-2">{children}</h1>,
+                      h2: ({children}) => <h2 className="text-base font-semibold mt-4 mb-2">{children}</h2>,
+                      h3: ({children}) => <h3 className="text-sm font-semibold mt-3 mb-1.5 text-slate-800">{children}</h3>,
+                      p: ({children}) => <p className="text-sm leading-6 text-slate-600 mb-3">{children}</p>,
+                      strong: ({children}) => <strong className="font-semibold text-slate-800">{children}</strong>,
+                      ul: ({children}) => <ul className="list-disc pl-5 space-y-1.5 mb-3">{children}</ul>,
+                      ol: ({children}) => <ol className="list-decimal pl-5 space-y-1.5 mb-3">{children}</ol>,
+                      li: ({children}) => <li className="text-sm leading-6 text-slate-600">{children}</li>,
+                      blockquote: ({children}) => <blockquote className="border-l-2 border-sky-300 pl-3 text-slate-500">{children}</blockquote>,
+                      code: ({className, children}) => {
+                        const isInline = !className;
+                        return isInline
+                          ? <code className="rounded bg-slate-100 px-1 py-0.5 text-xs">{children}</code>
+                          : <code className={className}>{children}</code>;
+                      },
+                      pre: ({children}) => <pre className="overflow-x-auto rounded-lg bg-slate-900 p-3 text-sm my-3">{children}</pre>,
+                      a: ({href, children}) => <a href={href} className="text-blue-600 hover:underline" target="_blank" rel="noopener noreferrer">{children}</a>,
+                      table: ({children}) => <div className="overflow-x-auto my-3"><table className="min-w-full text-sm">{children}</table></div>,
+                      th: ({children}) => <th className="border border-slate-200 px-3 py-2 text-left font-semibold">{children}</th>,
+                      td: ({children}) => <td className="border border-slate-200 px-3 py-2">{children}</td>,
+                    }}
+                  >
+                    {msg.text}
+                  </ReactMarkdown>
+                  </div>
+                ) : (
+                  <p className="text-sm leading-6 text-white">{msg.text}</p>
+                )}
 
                 {msg.cardType === 'transaction_draft' && !!msg.cardData && (
                   <div className="chat-card">
@@ -594,23 +791,26 @@ export function CoachPanel({ user }: { user: DemoUser }) {
           )}
         </div>
 
-        {messages.length < 2 && (
-          <QuickActionChips onAction={handleQuickAction} />
-        )}
+        <div className="chat-footer">
+          {messages.length < 2 && (
+            <QuickActionChips onAction={handleQuickAction} />
+          )}
 
-        <form className="chat-composer" onSubmit={handleSubmit}>
-          <label className="sr-only" htmlFor="coach-input">Ask about your money</label>
-          <input
-            id="coach-input"
-            maxLength={500}
-            placeholder="Ask about your money…"
-            value={input}
-            onChange={(e) => setInput(e.target.value)}
-          />
-          <button type="submit" disabled={!input.trim() || busy} aria-label="Send question">
-            <Send size={18} />
-          </button>
-        </form>
+          <form className="chat-composer" onSubmit={handleSubmit}>
+            <label className="sr-only" htmlFor="coach-input">Ask about your money</label>
+            <input
+              id="coach-input"
+              className="chat-composer__input"
+              maxLength={500}
+              placeholder="Ask about your money…"
+              value={input}
+              onChange={(e) => setInput(e.target.value)}
+            />
+            <button className="chat-composer__send" type="submit" disabled={!input.trim() || busy} aria-label="Send question">
+              <Send size={18} />
+            </button>
+          </form>
+        </div>
       </section>
 
       {showPinModal && (

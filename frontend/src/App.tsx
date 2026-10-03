@@ -1,4 +1,4 @@
-import {useEffect, useState} from 'react';
+import {useEffect, useState, type FocusEvent, type MouseEvent} from 'react';
 import {
   Bell,
   BookOpen,
@@ -118,7 +118,7 @@ function UpayHome({user}: {user: DemoUser}) {
     </section>
     <section className="home-section home-actions"><div className="section-title"><h2>upay Services</h2><Link to="/coach/assistant">Ask AI Assist</Link></div><div className="service-grid" aria-label="upay services">{services.map(([name, Icon, to]) => <Link className={`service-item ${name === 'AI Assist' ? 'service-item--assist' : ''}`} to={to} key={name}><span><Icon /></span><small>{name}</small></Link>)}</div></section>
     {summary && <section className="money-today home-section"><div className="section-title"><h2>Your Money Today</h2><Link to="/coach">View full insights <ArrowUpRight /></Link></div><div className="home-intelligence"><Link to="/coach/assistant" className="safe-spend-glance"><small>SAFE TO SPEND</small><strong>{formatBDT(summary.safe_to_spend.safe_to_spend)}</strong><span>After known commitments <ArrowUpRight /></span></Link><Link to="/coach" className="runway-glance"><small>MONEY RUNWAY</small><strong>~{summary.runway.days} days</strong><span>Based on recent spending <ArrowUpRight /></span></Link><Link to="/coach/insights" className="pulse-glance"><span className="pulse-glance__icon"><Sparkles /></span><span><small>MONEY PULSE</small><strong>{summary.pulse.why[0]?.label || summary.pulse.status}</strong><em>{summary.pulse.why[0]?.detail || summary.pulse.headline}</em></span><ArrowUpRight /></Link></div></section>}
-    <section className="home-section"><div className="section-title"><h2>Recent transactions</h2><Link to="/history">See all</Link></div><div className="home-activity">{summary?.recent_transactions.slice(0, 3).map((transaction) => <Link to="/history" key={transaction.id}><span className="merchant-icon">{transaction.merchant_name[0]}</span><span><strong>{transaction.merchant_name}</strong><small>{transaction.category} · Today</small></span><strong className={transaction.direction === 'income' ? 'money-positive' : 'money-negative'}>{transaction.direction === 'income' ? '+' : '-'}{formatBDT(transaction.amount)}</strong></Link>) || <div className="home-placeholder"><History /><span><strong>Your recent activity will appear here</strong><small>Loading your demo wallet activity.</small></span></div>}</div></section>
+    <section className="home-section"><div className="section-title"><h2>Recent transactions</h2><Link to="/coach/transactions">See all</Link></div><div className="home-activity">{summary?.recent_transactions.slice(0, 3).map((transaction) => <Link to="/coach/transactions" key={transaction.id}><span className="merchant-icon">{transaction.merchant_name[0]}</span><span><strong>{transaction.merchant_name}</strong><small>{transaction.category} · Today</small></span><strong className={transaction.direction === 'income' ? 'money-positive' : 'money-negative'}>{transaction.direction === 'income' ? '+' : '-'}{formatBDT(transaction.amount)}</strong></Link>) || <div className="home-placeholder"><History /><span><strong>Your recent activity will appear here</strong><small>Loading your demo wallet activity.</small></span></div>}</div></section>
     <section className="home-section home-secondary"><div className="section-title"><h2>Support & planning</h2></div><div className="home-shortcuts"><Link to="/people"><UsersRound /><span><strong>People, not numbers</strong><small>Recognize who you are paying</small></span></Link><Link to="/coach/assistant?guided=1"><Accessibility /><span><strong>Guided Mode</strong><small>One calm step at a time</small></span></Link></div></section>
     <p className="concept-note">Concept integration prototype · Synthetic demo data · Not an official production upay service</p>
   </div>;
@@ -149,40 +149,147 @@ function AppShell({user, switchUser}: {user: DemoUser; switchUser: (email: strin
   const [moreOpen, setMoreOpen] = useState(false);
   const [tourOpen, setTourOpen] = useState(false);
   const [switching, setSwitching] = useState('');
-  const primary = [
-    {to: '/', label: 'Home', icon: Home, end: true},
-    {to: '/coach', label: 'Pulse', icon: Zap, end: true},
-    {to: '/coach/plan', label: 'Plan', icon: Target},
-    {to: '/coach/assistant', label: 'AI Assist', icon: MessageCircle},
+  const [sidebarExpanded, setSidebarExpanded] = useState(false);
+  const [mobileDrawerOpen, setMobileDrawerOpen] = useState(false);
+  const [sidebarTooltip, setSidebarTooltip] = useState<{label: string; top: number} | null>(null);
+  const isSidebarExpanded = sidebarExpanded || mobileDrawerOpen;
+
+  const navConfig = [
+    {
+      section: 'MAIN',
+      items: [
+        {to: '/', label: 'Home', icon: Home, end: true},
+        {to: '/coach/plan', label: 'Quick Actions', icon: Target},
+        {to: '/coach/assistant', label: 'AI Assist', icon: MessageCircle},
+        {to: '/coach', label: 'Overview', icon: Zap, end: true},
+      ],
+    },
+    {
+      section: 'FINANCIAL TOOLS',
+      items: [
+        {to: '/coach/transactions', label: 'Transactions', icon: History},
+        {to: '/coach/insights', label: 'Insights', icon: Lightbulb},
+        {to: '/coach/reports', label: 'Financial Health', icon: FileBarChart},
+        {to: '/coach/goals', label: 'Savings', icon: PiggyBank},
+      ],
+    },
+    {
+      section: 'LEARN & SAVE',
+      items: [
+        {to: '/coach/learn', label: 'Learn', icon: BookOpen},
+        {to: '/offers', label: 'Offers', icon: Gift},
+      ],
+    },
+    {
+      section: 'PEOPLE & SAFETY',
+      items: [
+        {to: '/people', label: 'Trusted People', icon: UsersRound},
+        {to: '/trusted-helper', label: 'Helper Mode', icon: HandHeart},
+      ],
+    },
   ];
-  const secondary = [
-    {to: '/history', label: 'Transactions', icon: History},
-    {to: '/coach/insights', label: 'Insights', icon: Lightbulb},
-    {to: '/coach/reports', label: 'Reports', icon: FileBarChart},
-    {to: '/coach/learn', label: 'Learn', icon: BookOpen},
-    {to: '/offers', label: 'Relevant savings', icon: Gift},
-    {to: '/people', label: 'People', icon: UsersRound},
-    {to: '/trusted-helper', label: 'Trusted Helper', icon: HandHeart},
-  ];
+
   const changeProfile = async (email: string) => {
     setSwitching(email);
     await switchUser(email);
     setProfileOpen(false); setSwitching(''); navigate('/coach');
   };
-  const pageTitle = location.pathname === '/' ? `Good morning, ${user.display_name.split(' ')[0]}.` : location.pathname === '/coach' ? 'Your money, made clearer.' : location.pathname === '/coach/assistant' ? 'AI Assist' : 'upay AI Assist';
+
+  useEffect(() => {
+    setMobileDrawerOpen(false);
+    setMoreOpen(false);
+  }, [location.pathname]);
+
+  useEffect(() => {
+    if (!mobileDrawerOpen) return;
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setMobileDrawerOpen(false);
+    };
+    window.addEventListener('keydown', closeOnEscape);
+    return () => window.removeEventListener('keydown', closeOnEscape);
+  }, [mobileDrawerOpen]);
+
+  useEffect(() => {
+    if (isSidebarExpanded) setSidebarTooltip(null);
+  }, [isSidebarExpanded]);
+
+  const showSidebarTooltip = (label: string, event: MouseEvent<HTMLElement> | FocusEvent<HTMLElement>) => {
+    if (isSidebarExpanded) return;
+    const rect = event.currentTarget.getBoundingClientRect();
+    setSidebarTooltip({label, top: rect.top + rect.height / 2});
+  };
+
+  const getPageTitle = () => {
+    const path = location.pathname;
+    if (path === '/') return `Good morning, ${user.display_name.split(' ')[0]}.`;
+    if (path === '/coach') return 'Your money, made clearer.';
+    if (path === '/coach/assistant') return 'AI Assist';
+    if (path === '/coach/insights') return 'Financial Insights';
+    if (path === '/coach/transactions' || path === '/history') return 'Transactions';
+    if (path === '/coach/plan') return 'Plan';
+    if (path === '/coach/goals') return 'Goals';
+    if (path === '/coach/reports') return 'Reports';
+    if (path === '/coach/learn') return 'Learn';
+    if (path === '/offers') return 'Offers';
+    if (path === '/people') return 'Trusted People';
+    if (path === '/trusted-helper') return 'Helper Mode';
+    return 'upay AI Assist';
+  };
+
   return <div className="app-shell">
-    <aside className="sidebar">
-      <Link to="/" className="sidebar__brand"><Brand /></Link>
-      <span className="sidebar__concept">Concept integration prototype</span>
-      <nav aria-label="Main navigation">{primary.map(({to, label, icon: Icon, end}) => <NavLink end={end} to={to} key={to}><Icon />{label}</NavLink>)}</nav>
-      <div className="sidebar__divider" />
-      <nav aria-label="More financial tools">{secondary.map(({to, label, icon: Icon}) => <NavLink to={to} key={to}><Icon />{label}</NavLink>)}</nav>
-      <button className="tour-button" onClick={() => setTourOpen(true)}><CircleHelp />Demo tour</button>
-      <TrustBadge>Synthetic demo data</TrustBadge>
+    <aside className={`sidebar ${sidebarExpanded ? 'sidebar--expanded' : ''} ${mobileDrawerOpen ? 'sidebar--mobile-open' : ''}`}>
+      <div className="sidebar__header">
+        <Link to="/" className="sidebar__brand" onClick={() => setMobileDrawerOpen(false)}><Brand compact /></Link>
+        {isSidebarExpanded && <span className="sidebar__brand-label">AI Assist</span>}
+        <button
+          className="sidebar__toggle"
+          onClick={() => { setSidebarExpanded(!sidebarExpanded); setSidebarTooltip(null); }}
+          aria-label={sidebarExpanded ? 'Collapse sidebar' : 'Expand sidebar'}
+        >
+          {sidebarExpanded ? '‹' : '›'}
+        </button>
+        <button className="sidebar__drawer-close" onClick={() => setMobileDrawerOpen(false)} aria-label="Close navigation"><X /></button>
+      </div>
+
+      <nav className="sidebar__nav" aria-label="Main navigation">
+        {navConfig.map((group) => (
+          <div key={group.section} className="sidebar__group">
+            {isSidebarExpanded && <span className="sidebar__group-label">{group.section}</span>}
+            {group.items.map(({to, label, icon: Icon, end}) => (
+              <div key={to} className="sidebar__item-wrapper" onMouseEnter={(event) => showSidebarTooltip(label, event)} onMouseLeave={() => setSidebarTooltip(null)}>
+                <NavLink
+                  end={end}
+                  to={to}
+                  className={({isActive}) => `sidebar__link ${isActive ? 'active' : ''}`}
+                  aria-label={label}
+                  onClick={() => setMobileDrawerOpen(false)}
+                  onFocus={(event) => showSidebarTooltip(label, event)}
+                  onBlur={() => setSidebarTooltip(null)}
+                >
+                  <Icon className="sidebar__icon" />
+                  {isSidebarExpanded && <span className="sidebar__label">{label}</span>}
+                </NavLink>
+              </div>
+            ))}
+          </div>
+        ))}
+      </nav>
+
+      <div className="sidebar__footer">
+        <div className="sidebar__item-wrapper" onMouseEnter={(event) => showSidebarTooltip('Demo tour', event)} onMouseLeave={() => setSidebarTooltip(null)}>
+          <button className="sidebar__link" onClick={() => setTourOpen(true)} aria-label="Demo tour" onFocus={(event) => showSidebarTooltip('Demo tour', event)} onBlur={() => setSidebarTooltip(null)}>
+            <CircleHelp className="sidebar__icon" />
+            {isSidebarExpanded && <span className="sidebar__label">Demo tour</span>}
+          </button>
+        </div>
+        {isSidebarExpanded && <TrustBadge>Synthetic demo data</TrustBadge>}
+      </div>
+      {sidebarTooltip && <span className="sidebar__tooltip sidebar__tooltip--portal" role="tooltip" style={{top: sidebarTooltip.top}}>{sidebarTooltip.label}</span>}
     </aside>
-    <div className="app-content">
+    {mobileDrawerOpen && <button className="sidebar-backdrop" aria-label="Close navigation" onClick={() => setMobileDrawerOpen(false)} />}
+    <div className="app-main">
       <header className="topbar">
-        <div><span>UPAY · AI ASSIST</span><strong>{pageTitle}</strong></div>
+        <div className="topbar__title"><button className="topbar__menu-button icon-button" onClick={() => setMobileDrawerOpen(true)} aria-label="Open navigation"><Menu /></button><div><span>UPAY · AI ASSIST</span><strong>{getPageTitle()}</strong></div></div>
         <div className="topbar__actions">
           <span className="icon-button" aria-label="Notifications preview"><Bell /></span>
           <div className="profile-menu">
@@ -202,7 +309,8 @@ function AppShell({user, switchUser}: {user: DemoUser; switchUser: (email: strin
           <Route path="/coach/assistant" element={<CoachPanel user={user} />} />
           <Route path="/coach/reports" element={<ReportsPage />} />
           <Route path="/coach/learn" element={<LearnPage />} />
-          <Route path="/history" element={<HistoryPage />} />
+          <Route path="/coach/transactions" element={<HistoryPage />} />
+          <Route path="/history" element={<Navigate to="/coach/transactions" replace />} />
           <Route path="/offers" element={<OffersPage />} />
           <Route path="/people" element={<ContactsPage />} />
           <Route path="/trusted-helper" element={<TrustedHelperPage />} />
@@ -210,8 +318,8 @@ function AppShell({user, switchUser}: {user: DemoUser; switchUser: (email: strin
         </Routes>
       </main>
     </div>
-    <nav className="bottom-nav" aria-label="Mobile navigation"><NavLink end to="/"><Home /><span>Home</span></NavLink><NavLink to="/history"><History /><span>Activity</span></NavLink><NavLink className="bottom-nav__assist" to="/coach/assistant"><MessageCircle /><span>AI Assist</span></NavLink><NavLink to="/coach/plan"><Target /><span>Plan</span></NavLink><button className={moreOpen ? 'active' : ''} onClick={() => setMoreOpen(!moreOpen)}><MoreHorizontal /><span>More</span></button></nav>
-    {moreOpen && <div className="mobile-more"><div><span>More</span><button className="icon-button" onClick={() => setMoreOpen(false)} aria-label="Close more menu"><X /></button></div>{secondary.map(({to, label, icon: Icon}) => <Link to={to} onClick={() => setMoreOpen(false)} key={to}><Icon />{label}</Link>)}<button onClick={() => {setMoreOpen(false); setTourOpen(true);}}><CircleHelp />Demo tour</button></div>}
+    <nav className="bottom-nav" aria-label="Mobile navigation"><NavLink end to="/"><Home /><span>Home</span></NavLink><NavLink to="/coach/transactions"><History /><span>Activity</span></NavLink><NavLink className="bottom-nav__assist" to="/coach/assistant"><MessageCircle /><span>AI Assist</span></NavLink><NavLink to="/coach/plan"><Target /><span>Plan</span></NavLink><button className={moreOpen ? 'active' : ''} onClick={() => setMoreOpen(!moreOpen)}><MoreHorizontal /><span>More</span></button></nav>
+    {moreOpen && <div className="mobile-more"><div><span>More</span><button className="icon-button" onClick={() => setMoreOpen(false)} aria-label="Close more menu"><X /></button></div>{navConfig.flatMap(g => g.items).map(({to, label, icon: Icon}) => <Link to={to} onClick={() => setMoreOpen(false)} key={to}><Icon />{label}</Link>)}<button onClick={() => {setMoreOpen(false); setTourOpen(true);}}><CircleHelp />Demo tour</button></div>}
     {tourOpen && <><div className="tour-backdrop" onClick={() => setTourOpen(false)} /><DemoTour close={() => setTourOpen(false)} /></>}
   </div>;
 }

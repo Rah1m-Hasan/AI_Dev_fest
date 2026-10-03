@@ -79,6 +79,16 @@ def transactions(category:str|None=None, direction:str|None=None, q:str|None=Non
 def categories(): return {"categories":["Food","Transport","Shopping","Bills","Education","Healthcare","Entertainment","Subscriptions","Groceries","Mobile Recharge","Cash Out","Transfers","Rent","Other"]}
 @app.get("/api/v1/transactions/summary")
 def tx_summary(user:User=Depends(current_user),db:Session=Depends(get_db)): return spending_summary(db,user.id)
+@app.post("/api/v1/transactions/check-impact")
+def check_transaction_impact(
+    amount: float = 0,
+    user: User = Depends(current_user),
+    db: Session = Depends(get_db)
+):
+    from app.services.safe_to_spend_service import check_transaction_impact as _check
+    if amount <= 0:
+        raise HTTPException(400,"Amount must be greater than zero")
+    return _check(db, user, amount)
 @app.get("/api/v1/transactions/{transaction_id}")
 def transaction(transaction_id:int,user:User=Depends(current_user),db:Session=Depends(get_db)):
     t=db.get(Transaction,transaction_id)
@@ -393,14 +403,3 @@ def create_helper_request(body:HelperRequestIn,user:User=Depends(current_user),d
     from app.services.trusted_helper_service import create_helper_request as _create_request
     request = _create_request(db, user.id, body.helper_id, body.message)
     return {"request_id":request.id,"status":request.status,"message":request.message,"created_at":request.created_at.isoformat()}
-
-@app.post("/api/v1/transactions/check-impact")
-def check_transaction_impact(
-    amount: float = 0,
-    user: User = Depends(current_user),
-    db: Session = Depends(get_db)
-):
-    from app.services.safe_to_spend_service import check_transaction_impact as _check
-    if amount <= 0:
-        raise HTTPException(400,"Amount must be greater than zero")
-    return _check(db, user, amount)

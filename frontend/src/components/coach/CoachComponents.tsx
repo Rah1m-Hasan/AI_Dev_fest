@@ -79,8 +79,8 @@ export function TransactionDraftCard({
         )}
       </div>
       <div className="coach-card__actions">
-        {onChange && <button className="button button--small button--ghost" onClick={onChange}>Edit</button>}
-        {onCancel && <button className="button button--small button--ghost" onClick={onCancel}>Cancel</button>}
+        {onChange && <button className="button button--small button--secondary" onClick={onChange}>Edit</button>}
+        {onCancel && <button className="button button--small button--secondary" onClick={onCancel}>Cancel</button>}
         {onReview && <button className="button button--small" onClick={onReview}>Review transfer <ArrowRight size={14} /></button>}
       </div>
     </div>
@@ -104,7 +104,10 @@ export function TransferReviewCard({draft, onConfirm, onCancel}: {draft: {
       {draft.runway_before_days !== undefined && <div className="draft-impact"><span><small>Estimated runway</small><strong>{draft.runway_before_days} days</strong></span><ArrowRight size={16} /><span><small>After transfer</small><strong>{draft.runway_after_days} days</strong></span></div>}
       <p className="review-note">This is a simulated transfer. You will enter your PIN yourself before it completes.</p>
     </div>
-    <div className="coach-card__actions"><button className="button button--small button--ghost" onClick={onCancel}>Cancel</button><button className="button button--small" onClick={onConfirm}>Confirm <ArrowRight size={14} /></button></div>
+    <div className="coach-card__actions coach-card__actions--transfer">
+      <button className="button button--small button--secondary transfer-action transfer-action--cancel" onClick={onCancel}>Cancel</button>
+      <button className="button button--small transfer-action transfer-action--confirm" onClick={onConfirm}>Confirm <ArrowRight size={14} /></button>
+    </div>
   </div>;
 }
 
