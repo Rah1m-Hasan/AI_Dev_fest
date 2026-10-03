@@ -132,3 +132,51 @@ class ChatMessage(Base):
 class UserFeedback(Base):
     __tablename__ = "user_feedback"
     id: Mapped[int] = mapped_column(primary_key=True); user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True); feedback_type: Mapped[str] = mapped_column(String(40)); payload: Mapped[dict] = mapped_column(JSON, default=dict); created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+class TrustedContact(Base):
+    __tablename__ = "trusted_contacts"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
+    name: Mapped[str] = mapped_column(String(80))
+    phone_number: Mapped[str] = mapped_column(String(20))
+    relationship: Mapped[str] = mapped_column(String(40), default="Known")
+    nickname: Mapped[str | None] = mapped_column(String(40), nullable=True)
+    is_trusted: Mapped[bool] = mapped_column(Boolean, default=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+class TrustedHelper(Base):
+    __tablename__ = "trusted_helpers"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
+    helper_name: Mapped[str] = mapped_column(String(80))
+    relationship: Mapped[str] = mapped_column(String(40))
+    phone: Mapped[str] = mapped_column(String(20))
+    can_view_pending_transaction: Mapped[bool] = mapped_column(Boolean, default=False)
+    can_receive_alerts: Mapped[bool] = mapped_column(Boolean, default=True)
+    can_view_balance: Mapped[bool] = mapped_column(Boolean, default=False)
+    can_view_history: Mapped[bool] = mapped_column(Boolean, default=False)
+    can_initiate: Mapped[bool] = mapped_column(Boolean, default=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+class TransactionDraft(Base):
+    __tablename__ = "transaction_drafts"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
+    recipient_id: Mapped[int | None] = mapped_column(ForeignKey("trusted_contacts.id"), nullable=True)
+    recipient_name: Mapped[str] = mapped_column(String(80))
+    recipient_phone: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    amount: Mapped[float] = mapped_column(Numeric(14, 2))
+    fee: Mapped[float] = mapped_column(Numeric(14, 2), default=5)
+    reference: Mapped[str | None] = mapped_column(String(140), nullable=True)
+    state: Mapped[str] = mapped_column(String(30), default="draft_created")
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+class HelperRequest(Base):
+    __tablename__ = "helper_requests"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
+    helper_id: Mapped[int] = mapped_column(ForeignKey("trusted_helpers.id"))
+    status: Mapped[str] = mapped_column(String(20), default="pending")
+    message: Mapped[str | None] = mapped_column(String(280), nullable=True)
+    response: Mapped[str | None] = mapped_column(String(280), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)

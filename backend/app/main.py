@@ -8,7 +8,7 @@ from sqlalchemy import select, func
 from sqlalchemy.orm import Session
 from app.db import Base,engine,get_db
 from app.models import User,Transaction,Budget,SavingsGoal,Notification,CategoryFeedback
-from app.schemas import LoginIn,BudgetIn,GoalIn,ChatIn,CategoryCorrection,ScenarioIn
+from app.schemas import LoginIn,BudgetIn,GoalIn,ChatIn,CategoryCorrection,ScenarioIn,IntentIn,SendMoneyIn,TrustedContactIn,TrustedHelperIn,HelperRequestIn
 from app.api.deps import current_user
 from app.services.auth import create_token
 from app.services.seed import seed
@@ -25,7 +25,7 @@ async def lifespan(app):
     Base.metadata.create_all(bind=engine)
     db=next(get_db()); seed(db); db.close(); yield
 app=FastAPI(title="Upay AI Financial Coach",version="1.0.0",lifespan=lifespan,description="Synthetic-data concept prototype. Not an official upay service.")
-app.add_middleware(CORSMiddleware,allow_origins=[get_settings().frontend_url],allow_credentials=True,allow_methods=["GET","POST","PUT","PATCH"],allow_headers=["Authorization","Content-Type"])
+app.add_middleware(CORSMiddleware,allow_origins=[get_settings().frontend_url],allow_credentials=True,allow_methods=["GET","POST","PUT","PATCH","DELETE"],allow_headers=["Authorization","Content-Type"])
 
 @app.get("/api/v1/health")
 def health(): return {"status":"ok","service":"upay-ai-financial-coach","demo_data":"synthetic"}
@@ -47,7 +47,8 @@ def dashboard(user:User=Depends(current_user),db:Session=Depends(get_db)):
     weekly=defaultdict(float)
     for t in tx:
         if is_spending(t):weekly[f"Week {(t.timestamp-start).days//7+1}"]+=float(t.amount)
-    return {"disclaimer":"Concept prototype — synthetic demo data, not an official production upay service.","period_label":"Last 30 days","balance":amount(user.account.balance),"this_month":{"income":amount(income),"spending":amount(expense),"savings":amount(income-expense)},"budget":{"limit":amount(b.total_limit) if b else 0,"used":amount(expense),"utilization":round(float(expense/b.total_limit*100),1) if b else 0},"health":health_score(db,user),"spending_breakdown":sp["category_totals"],"weekly_spend":[{"week":k,"amount":round(v,2)} for k,v in sorted(weekly.items())],"recent_transactions":[transaction_out(t) for t in tx[:6]],"ai_insight":{"title":"Calculated spending insight","text":f"{sp['biggest_category'] or 'No category'} is your largest spending category this period.","basis":"deterministic transaction aggregation"},"forecast":fc,"pulse":money_pulse(db,user),"runway":money_runway(db,user),"comparison":spending_comparison(db,user),"safe_to_save":safe_to_save(db,user,7),"story":money_story(db,user)}
+    from app.services.safe_to_spend_service import calculate_safe_to_spend
+    return {"disclaimer":"Concept prototype — synthetic demo data, not an official production upay service.","period_label":"Last 30 days","balance":amount(user.account.balance),"this_month":{"income":amount(income),"spending":amount(expense),"savings":amount(income-expense)},"budget":{"limit":amount(b.total_limit) if b else 0,"used":amount(expense),"utilization":round(float(expense/b.total_limit*100),1) if b else 0},"health":health_score(db,user),"spending_breakdown":sp["category_totals"],"weekly_spend":[{"week":k,"amount":round(v,2)} for k,v in sorted(weekly.items())],"recent_transactions":[transaction_out(t) for t in tx[:6]],"ai_insight":{"title":"Calculated spending insight","text":f"{sp['biggest_category'] or 'No category'} is your largest spending category this period.","basis":"deterministic transaction aggregation"},"forecast":fc,"pulse":money_pulse(db,user),"runway":money_runway(db,user),"comparison":spending_comparison(db,user),"safe_to_spend":calculate_safe_to_spend(db,user),"safe_to_save":safe_to_save(db,user,7),"story":money_story(db,user)}
 
 @app.get("/api/v1/intelligence/overview")
 def intelligence_overview(user:User=Depends(current_user),db:Session=Depends(get_db)):
@@ -217,3 +218,189 @@ def offers(user:User=Depends(current_user),db:Session=Depends(get_db)):
     return {"opt_in":True,"offers":items,"disclaimer":"If you were already planning this purchase, the offer may reduce the cost."}
 @app.patch("/api/v1/offers/preferences")
 def offers_pref(enabled:bool=True,user:User=Depends(current_user)):return {"personalized_offers_enabled":enabled}
+
+# === NEW AI FINANCIAL COACH ENDPOINTS ===
+
+@app.post("/api/v1/coach/parse-intent")
+async def coach_parse_intent(body:IntentIn,user:User=Depends(current_user)):
+    """Parse user message into structured intent using deterministic fallback."""
+    from app.services.intent_service import parse_intent
+    intent = parse_intent(body.question)
+    return {"intent":intent.intent,"recipient_query":intent.recipient_query,"amount":intent.amount,"currency":intent.currency,"confidence":intent.confidence,"language":intent.language}
+
+@app.get("/api/v1/trusted-contacts")
+def trusted_contacts(user:User=Depends(current_user),db:Session=Depends(get_db)):
+    from app.services.recipient_service import get_trusted_contacts
+    from app.services.relationship_service import classify_relationship
+    contacts = get_trusted_contacts(db, user.id)
+    items=[]
+    for c in contacts:
+        history=classify_relationship(db,user.id,c,c.name)
+        trust_label = "Trusted" if c.is_trusted else ("Known" if history.previous_transaction_count else "Needs verification")
+        items.append({"id":c.id,"name":c.name,"phone_number":c.phone_number,"relationship":c.relationship,"nickname":c.nickname,"is_trusted":c.is_trusted,"trust_label":trust_label,"last_transfer_amount":history.last_transaction_amount,"last_transfer_date":history.last_transaction_date})
+    return {"items":items}
+
+@app.post("/api/v1/trusted-contacts")
+def create_trusted_contact(body:TrustedContactIn,user:User=Depends(current_user),db:Session=Depends(get_db)):
+    from app.services.recipient_service import add_trusted_contact
+    contact = add_trusted_contact(db, user.id, body.name, body.phone_number, body.relationship, body.nickname, body.is_trusted)
+    return {"id":contact.id,"name":contact.name,"phone_number":contact.phone_number,"relationship":contact.relationship,"nickname":contact.nickname,"is_trusted":contact.is_trusted}
+
+@app.delete("/api/v1/trusted-contacts/{contact_id}")
+def delete_trusted_contact(contact_id:int,user:User=Depends(current_user),db:Session=Depends(get_db)):
+    from app.services.recipient_service import remove_trusted_contact
+    if remove_trusted_contact(db, contact_id, user.id):
+        return {"deleted":True}
+    raise HTTPException(404,"Contact not found")
+
+@app.get("/api/v1/recipients/search")
+def search_recipients(q:str,user:User=Depends(current_user),db:Session=Depends(get_db)):
+    from app.services.recipient_service import find_best_contact_match
+    contacts = find_best_contact_match(db, user.id, q)
+    return {"items":[{"id":c.id,"name":c.name,"phone_number":c.phone_number,"relationship":c.relationship,"is_trusted":c.is_trusted} for c in contacts]}
+
+@app.get("/api/v1/recipients/resolve")
+def resolve_recipient_query(q:str,user:User=Depends(current_user),db:Session=Depends(get_db)):
+    """Resolve a person server-side. Ambiguity is always returned, never guessed."""
+    from app.services.recipient_service import resolve_recipient
+    contact, ambiguous = resolve_recipient(db, user.id, q)
+    def out(c): return {"id":c.id,"name":c.name,"phone_number":c.phone_number,"relationship":c.relationship,"is_trusted":c.is_trusted}
+    if contact: return {"status":"resolved","contact":out(contact),"matches":[]}
+    if ambiguous: return {"status":"ambiguous","contact":None,"matches":[out(c) for c in ambiguous]}
+    return {"status":"not_found","contact":None,"matches":[]}
+
+@app.get("/api/v1/recipients/{recipient_id}/relationship")
+def recipient_relationship(recipient_id:int,user:User=Depends(current_user),db:Session=Depends(get_db)):
+    from app.services.recipient_service import get_trusted_contacts
+    from app.services.relationship_service import classify_relationship
+    contacts = get_trusted_contacts(db, user.id)
+    contact = next((c for c in contacts if c.id == recipient_id), None)
+    rel_info = classify_relationship(db, user.id, contact, contact.name if contact else "")
+    return {"recipient_id":rel_info.recipient_id,"recipient_name":rel_info.recipient_name,"relationship_type":rel_info.relationship_type,"previous_transaction_count":rel_info.previous_transaction_count,"last_transaction_amount":rel_info.last_transaction_amount,"last_transaction_date":rel_info.last_transaction_date,"average_transaction_amount":rel_info.average_transaction_amount,"total_sent":rel_info.total_sent,"evidence":rel_info.evidence}
+
+@app.get("/api/v1/coach/safe-to-spend")
+def coach_safe_to_spend(user:User=Depends(current_user),db:Session=Depends(get_db)):
+    from app.services.safe_to_spend_service import calculate_safe_to_spend
+    return calculate_safe_to_spend(db, user)
+
+@app.get("/api/v1/coach/income-adaptive")
+def coach_income_adaptive(user:User=Depends(current_user),db:Session=Depends(get_db)):
+    from app.services.income_adaptive_service import calculate_income_adaptive
+    return calculate_income_adaptive(db, user)
+
+@app.post("/api/v1/transactions/draft")
+def create_transaction_draft(
+    recipient_id:int|None=None,
+    recipient_name:str="",
+    recipient_phone:str|None=None,
+    amount:float=0,
+    reference:str|None=None,
+    user:User=Depends(current_user),
+    db:Session=Depends(get_db)
+):
+    from app.services.transaction_draft_service import create_draft, get_draft_summary
+    from app.services.relationship_service import classify_relationship
+    from app.services.safe_to_spend_service import calculate_safe_to_spend
+    from app.services.recipient_service import get_trusted_contacts
+
+    if amount <= 0:
+        raise HTTPException(400,"Amount must be greater than zero")
+
+    contacts = get_trusted_contacts(db, user.id)
+    contact = next((c for c in contacts if c.id == recipient_id), None) if recipient_id else None
+    rel_info = classify_relationship(db, user.id, contact, recipient_name, amount)
+    safe_before = calculate_safe_to_spend(db, user)
+    draft = create_draft(db, user.id, recipient_id, recipient_name, recipient_phone, amount, reference)
+    return get_draft_summary(db, draft, user, rel_info, safe_before)
+
+@app.get("/api/v1/transactions/draft/active")
+def get_active_draft(user:User=Depends(current_user),db:Session=Depends(get_db)):
+    from app.services.transaction_draft_service import get_active_draft, get_draft_summary
+    from app.services.safe_to_spend_service import calculate_safe_to_spend
+    from app.services.relationship_service import classify_relationship
+    draft = get_active_draft(db, user.id)
+    if not draft:
+        return {"has_active_draft":False}
+    from app.models import TrustedContact
+    contact = db.get(TrustedContact, draft.recipient_id) if draft.recipient_id else None
+    rel_info = classify_relationship(db, user.id, contact, draft.recipient_name, draft.amount)
+    safe_before = calculate_safe_to_spend(db, user)
+    return {"has_active_draft":True,"draft":get_draft_summary(db, draft, user, rel_info, safe_before)}
+
+@app.post("/api/v1/transactions/draft/{draft_id}/review")
+def review_draft(draft_id:int,user:User=Depends(current_user),db:Session=Depends(get_db)):
+    from app.services.transaction_draft_service import get_active_draft, review_draft as _review_draft, DraftState
+    draft = get_active_draft(db, user.id)
+    if not draft or draft.id != draft_id: raise HTTPException(404,"Draft not found")
+    if draft.state != DraftState.DRAFT.value: raise HTTPException(400,f"Cannot review draft in state: {draft.state}")
+    draft = _review_draft(db, draft)
+    return {"draft_id":draft.id,"state":draft.state}
+
+@app.post("/api/v1/transactions/draft/{draft_id}/confirm")
+def confirm_draft(draft_id:int,user:User=Depends(current_user),db:Session=Depends(get_db)):
+    from app.services.transaction_draft_service import get_active_draft, confirm_draft as _confirm_draft, DraftState
+    draft = get_active_draft(db, user.id)
+    if not draft or draft.id != draft_id:
+        raise HTTPException(404,"Draft not found")
+    if draft.state != DraftState.REVIEWED.value:
+        raise HTTPException(400,f"Cannot confirm draft in state: {draft.state}")
+    draft = _confirm_draft(db, draft)
+    return {"draft_id":draft.id,"state":draft.state,"requires_pin":True}
+
+@app.post("/api/v1/transactions/draft/{draft_id}/execute")
+def execute_draft(draft_id:int,body:SendMoneyIn,user:User=Depends(current_user),db:Session=Depends(get_db)):
+    from app.services.transaction_draft_service import get_active_draft, verify_pin, DraftState
+    draft = get_active_draft(db, user.id)
+    if not draft or draft.id != draft_id:
+        raise HTTPException(404,"Draft not found")
+    if draft.state != DraftState.CONFIRMED.value:
+        raise HTTPException(400,f"Cannot execute draft in state: {draft.state}")
+    success, message = verify_pin(db, draft, body.pin)
+    if success:
+        return {"success":True,"message":"Demo transfer completed. No real money moved.","balance_after":float(db.get(User,user.id).account.balance)}
+    return {"success":False,"message":message}
+
+@app.delete("/api/v1/transactions/draft/{draft_id}")
+def cancel_draft(draft_id:int,user:User=Depends(current_user),db:Session=Depends(get_db)):
+    from app.services.transaction_draft_service import get_active_draft, cancel_draft as _cancel_draft
+    draft = get_active_draft(db, user.id)
+    if not draft or draft.id != draft_id:
+        raise HTTPException(404,"Draft not found")
+    draft = _cancel_draft(db, draft)
+    return {"draft_id":draft.id,"state":draft.state}
+
+@app.get("/api/v1/trusted-helpers")
+def trusted_helpers(user:User=Depends(current_user),db:Session=Depends(get_db)):
+    from app.services.trusted_helper_service import get_trusted_helpers
+    helpers = get_trusted_helpers(db, user.id)
+    return {"items":[{"id":h.id,"helper_name":h.helper_name,"relationship":h.relationship,"phone":h.phone,"can_view_pending_transaction":h.can_view_pending_transaction,"can_receive_alerts":h.can_receive_alerts,"can_view_balance":h.can_view_balance,"can_view_history":h.can_view_history,"can_initiate":h.can_initiate} for h in helpers]}
+
+@app.post("/api/v1/trusted-helpers")
+def create_trusted_helper(body:TrustedHelperIn,user:User=Depends(current_user),db:Session=Depends(get_db)):
+    from app.services.trusted_helper_service import add_trusted_helper
+    helper = add_trusted_helper(db, user.id, body.helper_name, body.relationship, body.phone, body.can_view_pending_transaction, body.can_receive_alerts, body.can_view_balance, body.can_view_history, body.can_initiate)
+    return {"id":helper.id,"helper_name":helper.helper_name,"relationship":helper.relationship,"phone":helper.phone,"can_view_pending_transaction":helper.can_view_pending_transaction,"can_receive_alerts":helper.can_receive_alerts,"can_view_balance":helper.can_view_balance,"can_view_history":helper.can_view_history,"can_initiate":helper.can_initiate}
+
+@app.delete("/api/v1/trusted-helpers/{helper_id}")
+def delete_trusted_helper(helper_id:int,user:User=Depends(current_user),db:Session=Depends(get_db)):
+    from app.services.trusted_helper_service import remove_trusted_helper
+    if remove_trusted_helper(db, helper_id, user.id):
+        return {"deleted":True}
+    raise HTTPException(404,"Helper not found")
+
+@app.post("/api/v1/trusted-helper/request")
+def create_helper_request(body:HelperRequestIn,user:User=Depends(current_user),db:Session=Depends(get_db)):
+    from app.services.trusted_helper_service import create_helper_request as _create_request
+    request = _create_request(db, user.id, body.helper_id, body.message)
+    return {"request_id":request.id,"status":request.status,"message":request.message,"created_at":request.created_at.isoformat()}
+
+@app.post("/api/v1/transactions/check-impact")
+def check_transaction_impact(
+    amount: float = 0,
+    user: User = Depends(current_user),
+    db: Session = Depends(get_db)
+):
+    from app.services.safe_to_spend_service import check_transaction_impact as _check
+    if amount <= 0:
+        raise HTTPException(400,"Amount must be greater than zero")
+    return _check(db, user, amount)

@@ -13,10 +13,10 @@ import {formatBDT, formatDate, titleCase} from '../format';
 import type {Change, Health, MoneyStory, Transaction} from '../types';
 
 export function Brand({compact = false}: {compact?: boolean}) {
-  return <div className={`brand ${compact ? 'brand--compact' : ''}`} aria-label="upay AI Financial Coach">
+  return <div className={`brand ${compact ? 'brand--compact' : ''}`} aria-label="upay AI Assist">
     <span className="brand__mark">u</span>
     <strong>upay</strong>
-    {!compact && <><i /><span>AI Coach</span></>}
+    {!compact && <><i /><span>AI Assist</span></>}
   </div>;
 }
 
@@ -122,7 +122,7 @@ export function EvidenceDrawer({evidence, close}: {evidence: Record<string, unkn
   if (runway) {add('Estimated runway', `${runway.days} days`); add('Current balance', formatBDT(Number(runway.today_balance || 0))); add('Expected 14-day spending', formatBDT(Number(runway.expected_14_day_expenses || 0))); add('Expected 14-day balance', formatBDT(Number(runway.expected_14_day_balance || 0))); add('Forecast confidence', titleCase(String(runway.confidence || '')));}
   if (!rows.length) add('Calculation', 'Structured financial facts from your synthetic demo activity');
   return <Sheet title="How this answer was calculated" close={close} wide>
-    <p className="sheet__intro">The coach receives only the calculated facts needed for this answer. It does not invent these values.</p>
+    <p className="sheet__intro">AI Assist receives only the calculated facts needed for this answer. It does not invent these values.</p>
     <div className="evidence-grid">{rows.map(([label, value]) => <div key={`${label}-${value}`}><span>{label}</span><strong>{value}</strong></div>)}</div>
     <div className="evidence-foot"><CheckCircle2 size={18} /><span>Calculated from synthetic demo transactions. Forecasts are estimates.</span></div>
   </Sheet>;
@@ -141,17 +141,19 @@ export function TransactionRow({transaction, onClick}: {transaction: Transaction
 
 export function WhatChangedCard({changes, summary, onEvidence}: {changes: Change[]; summary: string; onEvidence?: () => void}) {
   const visible = changes.filter((item) => item.difference !== 0).slice(0, 4);
+  const lead = visible[0];
   return <section className="card change-card">
-    <div className="card__header"><div><span className="eyebrow">Current vs previous 30 days</span><h2>What changed?</h2></div><Tag tone="ai">Calculated</Tag></div>
-    <div className="change-list">{visible.map((item) => {
+    <div className="card__header"><div><span className="eyebrow">Current vs previous 30 days</span><h2>Watch spending</h2></div><Tag tone="ai">Calculated</Tag></div>
+    {lead && <div className="change-list">{[lead].map((item) => {
       const up = item.difference > 0;
       return <div className="change-item" key={item.category}>
         <span className={`trend-icon ${up ? 'trend-icon--up' : 'trend-icon--down'}`}>{up ? <ArrowUpRight /> : <ArrowDownRight />}</span>
         <span><strong>{item.category}</strong><small>{formatBDT(item.current)} this period</small></span>
         <span className={up ? 'money-negative' : 'money-positive'}>{formatBDT(item.difference, true)}<small>{item.change_percent === null ? 'new activity' : `${item.change_percent > 0 ? '+' : ''}${item.change_percent}%`}</small></span>
       </div>;
-    })}</div>
+    })}</div>}
     <p className="card__summary">{summary}</p>
+    {visible.length > 1 && <details className="card-details"><summary>See more categories</summary><div className="change-list">{visible.slice(1).map((item) => { const up = item.difference > 0; return <div className="change-item" key={item.category}><span className={`trend-icon ${up ? 'trend-icon--up' : 'trend-icon--down'}`}>{up ? <ArrowUpRight /> : <ArrowDownRight />}</span><span><strong>{item.category}</strong><small>{formatBDT(item.current)} this period</small></span><span className={up ? 'money-negative' : 'money-positive'}>{formatBDT(item.difference, true)}</span></div>; })}</div></details>}
     {onEvidence && <button className="text-button" onClick={onEvidence}>See comparison evidence <ArrowUpRight size={15} /></button>}
   </section>;
 }

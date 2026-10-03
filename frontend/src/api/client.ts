@@ -9,7 +9,7 @@ export async function api<T=Record<string,unknown>>(path:string, init:RequestIni
   try {
     response=await fetch(BASE+path,{...init,headers:{'Content-Type':'application/json',...(token()?{Authorization:`Bearer ${token()}`}:{}) ,...(init.headers||{})}});
   } catch {
-    throw new ApiError("We couldn't connect to the financial coach. Check that the API is running, then try again.",0);
+    throw new ApiError("We couldn't connect to AI Assist. Check that the API is running, then try again.",0);
   }
   if(!response.ok){
     const payload=await response.json().catch(()=>null) as {detail?:unknown}|null;

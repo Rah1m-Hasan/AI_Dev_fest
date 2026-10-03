@@ -8,6 +8,13 @@ from app.services.seed import seed
 from app.services.auth import create_token, decode_token
 from app.services.analytics_service import spending_summary, run_out_analysis, budget_recommendation, goal_plan, forecast, health_score, safe_to_save, simulate_scenario
 from app.services.groq_service import explain
+from app.services.intent_service import parse_intent
+from app.services.recipient_service import resolve_recipient
+from app.services.safe_to_spend_service import calculate_safe_to_spend, check_transaction_impact
+from app.services.transaction_draft_service import DraftState, create_draft, get_draft_summary, transition_state
+from app.services.relationship_service import classify_relationship
+from app.services.trusted_helper_service import add_trusted_helper
+from app.services.recipient_service import add_trusted_contact
 
 def db_with_demo():
     Base.metadata.create_all(engine)
@@ -98,3 +105,62 @@ def test_required_api_routes_are_registered():
     paths={route.path for route in app.routes}
     required={'/api/v1/dashboard/summary','/api/v1/intelligence/overview','/api/v1/transactions/{transaction_id}/context','/api/v1/scenarios/simulate','/api/v1/coach/chat','/api/v1/reports/monthly'}
     assert required<=paths
+
+def test_banglish_send_intent_never_invents_a_recipient_or_amount():
+    parsed=parse_intent("Rafi ke 2000 taka pathabo")
+    assert parsed.intent == "send_money"
+    assert parsed.recipient_query == "rafi"
+    assert parsed.amount == 2000
+    incomplete=parse_intent("Rafi ke taka pathao")
+    assert incomplete.intent == "send_money"
+    assert incomplete.recipient_query == "rafi"
+    assert incomplete.amount is None
+
+def test_safe_to_spend_and_transfer_impact_reconcile():
+    db=db_with_demo()
+    try:
+        user=db.scalar(select(User).where(User.email=='demo.student@upay.local'))
+        safe=calculate_safe_to_spend(db,user)
+        assert safe['safe_to_spend'] == max(0, round(safe['current_balance']-safe['upcoming_committed_expenses']-safe['recommended_reserve']-safe['reserved_savings'],2))
+        impact=check_transaction_impact(db,user,2000)
+        assert impact['total'] >= 2005
+        assert impact['safe_to_spend_after'] <= safe['safe_to_spend']
+    finally: db.close()
+
+def test_recipient_resolution_and_draft_state_machine_require_human_steps():
+    db=db_with_demo()
+    try:
+        user=db.scalar(select(User).where(User.email=='demo.student@upay.local'))
+        contact, ambiguous=resolve_recipient(db,user.id,"Rafi")
+        assert contact is not None and not ambiguous and contact.name == "Rafi Ahmed"
+        draft=create_draft(db,user.id,contact.id,contact.name,contact.phone_number,2000)
+        assert draft.state == DraftState.DRAFT.value
+        summary=get_draft_summary(db,draft,user,classify_relationship(db,user.id,contact,contact.name,2000),calculate_safe_to_spend(db,user))
+        assert summary['balance_after'] == round(float(user.account.balance)-summary['total'],2)
+        assert summary['runway_after_days'] <= summary['runway_before_days']
+        with __import__('pytest').raises(ValueError):
+            transition_state(db,draft,DraftState.COMPLETED)
+        transition_state(db,draft,DraftState.REVIEWED)
+        transition_state(db,draft,DraftState.CONFIRMED)
+        transition_state(db,draft,DraftState.PIN_VERIFIED)
+        transition_state(db,draft,DraftState.COMPLETED)
+        assert draft.state == DraftState.COMPLETED.value
+    finally: db.close()
+
+def test_trusted_helper_never_receives_payment_authority():
+    db=db_with_demo()
+    try:
+        user=db.scalar(select(User).where(User.email=='demo.student@upay.local'))
+        helper=add_trusted_helper(db,user.id,"Nusrat Ahmed","Daughter","01800000000",can_initiate=True)
+        assert helper.can_initiate is False
+    finally: db.close()
+
+def test_ambiguous_recipient_is_returned_for_user_choice():
+    db=db_with_demo()
+    try:
+        user=db.scalar(select(User).where(User.email=='demo.student@upay.local'))
+        add_trusted_contact(db,user.id,"Rafi Islam","01811111111","Friend",nickname="Rafi")
+        contact, ambiguous=resolve_recipient(db,user.id,"Rafi")
+        assert contact is None
+        assert {item.name for item in ambiguous} == {"Rafi Ahmed","Rafi Islam"}
+    finally: db.close()

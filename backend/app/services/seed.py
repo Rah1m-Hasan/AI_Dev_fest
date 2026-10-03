@@ -4,12 +4,43 @@ from decimal import Decimal
 from datetime import datetime, timedelta, date
 from sqlalchemy.orm import Session
 from sqlalchemy import select
-from app.models import User,Account,Transaction,Budget,SavingsGoal,Notification
+from app.models import User,Account,Transaction,Budget,SavingsGoal,Notification,TrustedContact,TrustedHelper
 
 MERCHANTS={"Food":["Bhojon Express","Cafe Dhaka","Pathao Food"],"Groceries":["Shwapno","Meena Bazar","Agora"],"Transport":["Pathao","Uber","Metro Rail"],"Bills":["DESCO","WASA","BTCL"],"Mobile Recharge":["Grameenphone","Robi"],"Entertainment":["Star Cineplex","Bioscope"],"Shopping":["Daraz","Aarong"],"Education":["DIU Fees","Bookworm"],"Healthcare":["Popular Diagnostic","Pharmacy"],"Subscriptions":["Spotify","Google One"],"Cash Out":["Agent Cash Out"]}
 PERSONAS=[("demo.student@upay.local","Arif Rahman","student",12000,10500),("demo.salary@upay.local","Nadia Islam","salaried worker",38000,22000),("demo.freelancer@upay.local","Samiha Noor","freelancer",30000,15000),("demo.business@upay.local","Rafi Ahmed","small business owner",52000,30000)]
 def seed(db:Session):
-    if db.scalar(select(User.id).limit(1)): return
+    existing_users = list(db.scalars(select(User)))
+    if existing_users:
+        # Existing developer databases may predate the human-centered payment
+        # entities. Backfill only the safe, synthetic demo contacts needed by
+        # the UI; never rewrite accounts or transaction history.
+        for user in existing_users:
+            # Keep the showcase contact consistent with the documented demo
+            # story. This touches synthetic contact metadata only.
+            rafi = db.scalar(select(TrustedContact).where(TrustedContact.user_id == user.id, TrustedContact.name == "Rafi Ahmed"))
+            if rafi and rafi.relationship == "Son":
+                rafi.relationship = "Brother"
+            if not db.scalar(select(TrustedContact.id).where(TrustedContact.user_id == user.id).limit(1)):
+                if user.persona == "student":
+                    db.add_all([
+                        TrustedContact(user_id=user.id,name="Rafi Ahmed",phone_number="01712345678",relationship="Brother",nickname="Rafi",is_trusted=True),
+                        TrustedContact(user_id=user.id,name="Mim Akter",phone_number="01812345678",relationship="Daughter",nickname="Mim",is_trusted=True),
+                        TrustedContact(user_id=user.id,name="Rahman",phone_number="01912345678",relationship="Landlord",is_trusted=True),
+                    ])
+                elif user.persona == "salaried worker":
+                    db.add_all([
+                        TrustedContact(user_id=user.id,name="Rafi Ahmed",phone_number="01712345678",relationship="Brother",nickname="Rafi",is_trusted=True),
+                        TrustedContact(user_id=user.id,name="Samiha",phone_number="01887654321",relationship="Sister",nickname="Samiha",is_trusted=True),
+                    ])
+                elif user.persona == "freelancer":
+                    db.add_all([
+                        TrustedContact(user_id=user.id,name="Arif Rahman",phone_number="01712345678",relationship="Brother",nickname="Arif",is_trusted=True),
+                        TrustedContact(user_id=user.id,name="Nadia",phone_number="01812345678",relationship="Friend",nickname="Nadia",is_trusted=True),
+                    ])
+            if user.persona == "student" and not db.scalar(select(TrustedHelper.id).where(TrustedHelper.user_id == user.id).limit(1)):
+                db.add(TrustedHelper(user_id=user.id,helper_name="Mim Akter",relationship="Daughter",phone="01812345678",can_view_pending_transaction=True,can_receive_alerts=True,can_view_balance=False,can_view_history=False,can_initiate=False))
+        db.commit()
+        return
     rng=random.Random(2026); now=datetime.now().replace(second=0,microsecond=0)
     for email,name,persona,income,starting in PERSONAS:
         u=User(email=email,display_name=name,persona=persona); db.add(u);db.flush(); balance=Decimal(str(starting))
@@ -56,4 +87,16 @@ def seed(db:Session):
         start=(now-timedelta(days=29)).date(); db.add(Budget(user_id=u.id,total_limit=income*.72, start_date=start,end_date=now.date(),categories={"Food":income*.16,"Transport":income*.09,"Groceries":income*.14,"Bills":income*.1,"Entertainment":income*.06}))
         db.add(SavingsGoal(user_id=u.id,name="Laptop Fund" if persona=="student" else "Emergency buffer",target_amount=30000 if persona=="student" else 50000,current_amount=5000 if persona=="student" else 12000,target_date=date.today()+timedelta(days=180)))
         db.add(Notification(user_id=u.id,title="Synthetic demo data",body="This prototype uses generated transactions, not production upay data.",severity="info"))
+        # Add trusted contacts
+        if persona == "student":
+            db.add(TrustedContact(user_id=u.id,name="Rafi Ahmed",phone_number="01712345678",relationship="Brother",nickname="Rafi",is_trusted=True))
+            db.add(TrustedContact(user_id=u.id,name="Mim Akter",phone_number="01812345678",relationship="Daughter",nickname="Mim",is_trusted=True))
+            db.add(TrustedContact(user_id=u.id,name="Rahman",phone_number="01912345678",relationship="Landlord",is_trusted=True))
+            db.add(TrustedHelper(user_id=u.id,helper_name="Mim Akter",relationship="Daughter",phone="01812345678",can_view_pending_transaction=True,can_receive_alerts=True,can_view_balance=False,can_view_history=False,can_initiate=False))
+        elif persona == "salaried worker":
+            db.add(TrustedContact(user_id=u.id,name="Rafi Ahmed",phone_number="01712345678",relationship="Brother",nickname="Rafi",is_trusted=True))
+            db.add(TrustedContact(user_id=u.id,name="Samiha",phone_number="01887654321",relationship="Sister",nickname="Samiha",is_trusted=True))
+        elif persona == "freelancer":
+            db.add(TrustedContact(user_id=u.id,name="Arif Rahman",phone_number="01712345678",relationship="Brother",nickname="Arif",is_trusted=True))
+            db.add(TrustedContact(user_id=u.id,name="Nadia",phone_number="01812345678",relationship="Friend",nickname="Nadia",is_trusted=True))
     db.commit()

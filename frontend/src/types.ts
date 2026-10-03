@@ -106,6 +106,7 @@ export type DashboardSummary = {
   forecast: Record<string, unknown>;
   pulse: MoneyPulse;
   runway: MoneyRunway;
+  safe_to_spend: SafeToSpend;
   comparison: {period: {start: string; end: string}; categories: Change[]; summary: string; source: string};
   safe_to_save: SafeToSave;
   story: MoneyStory;
@@ -149,4 +150,49 @@ export type CoachMessage = {
   evidence?: Record<string, unknown>;
   provider?: string;
   intent?: string;
+};
+
+export type TrustedContact = {
+  id: number;
+  name: string;
+  phone_number: string;
+  relationship: string;
+  nickname?: string;
+  is_trusted: boolean;
+};
+
+export type TransactionDraft = {
+  draft_id?: number;
+  recipient: {
+    id: number | null;
+    name: string;
+    phone: string | null;
+  };
+  relationship: string;
+  amount: number;
+  fee: number;
+  total: number;
+  available_balance: number;
+  balance_after: number;
+  safe_to_spend_before?: number;
+  reference?: string;
+  state: string;
+};
+
+export type SafeToSpend = {
+  current_balance: number;
+  upcoming_committed_expenses: number;
+  recommended_reserve: number;
+  safe_to_spend: number;
+  breakdown: Record<string, number>;
+};
+
+export type IncomeAdaptive = {
+  income_last_7_days: number;
+  average_weekly_income: number;
+  difference_percent: number;
+  income_pattern: string;
+  suggested_savings_min: number;
+  suggested_savings_max: number;
+  explanation: string;
 };

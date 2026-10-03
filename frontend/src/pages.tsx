@@ -84,12 +84,12 @@ function useResource<T>(path: string) {
 
 function MoneyPulseCard({data, ask}: {data: DashboardSummary; ask: () => void}) {
   const pulse = data.pulse;
+  const lead = pulse.why[0];
   return <section className="card money-pulse">
-    <div className="card__header"><div><Tag tone={pulse.status === 'Stable' ? 'positive' : 'warning'}>{pulse.status}</Tag><h2><Sparkles />Money Pulse</h2></div><TrustBadge>Calculated</TrustBadge></div>
+    <div className="card__header"><div><span className="eyebrow">Money Pulse</span><h2><Sparkles />{pulse.status}</h2></div><TrustBadge>Calculated</TrustBadge></div>
     <p className="money-pulse__headline">{pulse.headline || pulse.text}</p>
-    <div className="pulse-drivers">{pulse.why.slice(0, 2).map((driver) => <div key={driver.label}><span className="pulse-driver__icon"><TrendingUp /></span><span><strong>{driver.label}</strong><small>{driver.detail}</small></span></div>)}</div>
-    <div className="pulse-next"><Lightbulb /><span>{pulse.next}</span></div>
-    <div className="card__actions"><Link className="button button--secondary" to="/coach/insights">Why?</Link><button className="button" onClick={ask}><MessageCircle />Ask AI</button></div>
+    {lead && <div className="pulse-drivers"><div><span className="pulse-driver__icon"><TrendingUp /></span><span><strong>{lead.label}</strong><small>{lead.detail}</small></span></div></div>}
+    <div className="card__actions"><Link className="button button--secondary" to="/coach/insights">See why</Link><button className="button" onClick={ask}><MessageCircle />Ask AI Assist</button></div>
   </section>;
 }
 
@@ -98,9 +98,9 @@ function RunwayCard({runway}: {runway: MoneyRunway}) {
   return <section className="card runway-card">
     <div className="card__header"><div><span className="eyebrow">Forecast · {runway.confidence} confidence</span><h2>Money Runway</h2></div><Tag tone="ai">Estimate</Tag></div>
     <div className="runway-card__value"><strong>~{runway.days}</strong><span>days</span></div>
-    <p>How long your current money may comfortably last at the recent pace.</p>
+    <p>At your recent spending pace.</p>
     <div className="mini-chart" aria-label="14-day balance forecast"><ResponsiveContainer width="100%" height="100%"><AreaChart data={points}><defs><linearGradient id="runwayFill" x1="0" y1="0" x2="0" y2="1"><stop offset="5%" stopColor="#179EC1" stopOpacity={0.24}/><stop offset="95%" stopColor="#179EC1" stopOpacity={0}/></linearGradient></defs><XAxis dataKey="name" axisLine={false} tickLine={false} fontSize={11}/><Tooltip formatter={(value) => formatBDT(Number(value))}/><Area type="monotone" dataKey="balance" stroke="#075A8C" strokeWidth={3} fill="url(#runwayFill)" /></AreaChart></ResponsiveContainer></div>
-    <div className="metric-list"><span><small>Current</small><strong>{formatBDT(runway.today_balance)}</strong></span><span><small>Expected 14-day spending</small><strong>-{formatBDT(runway.expected_14_day_expenses)}</strong></span><span><small>Expected balance</small><strong>{formatBDT(runway.expected_14_day_balance)}</strong></span></div>
+    <details className="card-details"><summary>View forecast details</summary><div className="metric-list"><span><small>Current</small><strong>{formatBDT(runway.today_balance)}</strong></span><span><small>Expected 14-day spending</small><strong>-{formatBDT(runway.expected_14_day_expenses)}</strong></span><span><small>Expected balance</small><strong>{formatBDT(runway.expected_14_day_balance)}</strong></span></div></details>
   </section>;
 }
 
@@ -115,8 +115,8 @@ function SafeToSaveCard({safe}: {safe: SafeToSave}) {
   ] as const;
   return <section className="card safe-card">
     <div className="card__header"><div><span className="eyebrow">Demo allocation</span><h2>Safe-to-Save</h2></div><PiggyBank /></div>
-    <strong className="safe-card__range">{safe.high > 0 ? `${formatBDT(safe.low)}–${formatBDT(safe.high)}` : 'Pause this week'}</strong><p>{safe.high > 0 ? `Estimated flexible amount for the next ${safe.period_days} days.` : 'Recent cash flow does not show a comfortable amount to move into savings right now.'}</p>
-    <div className="safe-breakdown">{rows.map(([label, value]) => <span key={label}><small>{label}</small><strong className={value < 0 ? 'money-negative' : ''}>{formatBDT(value, value > 0 && label === 'Expected income')}</strong></span>)}<span className="safe-breakdown__total"><small>Estimated flexibility</small><strong>{formatBDT(safe.breakdown.estimated_flexibility)}</strong></span></div>
+    <strong className="safe-card__range">{safe.high > 0 ? `${formatBDT(safe.low)}–${formatBDT(safe.high)}` : 'Pause this week'}</strong><p>{safe.high > 0 ? `Flexible for the next ${safe.period_days} days.` : 'Saving extra this week may be difficult.'}</p>
+    <details className="card-details"><summary>See calculation</summary><div className="safe-breakdown">{rows.map(([label, value]) => <span key={label}><small>{label}</small><strong className={value < 0 ? 'money-negative' : ''}>{formatBDT(value, value > 0 && label === 'Expected income')}</strong></span>)}<span className="safe-breakdown__total"><small>Estimated flexibility</small><strong>{formatBDT(safe.breakdown.estimated_flexibility)}</strong></span></div></details>
     <Link className="button button--secondary button--full" to="/coach/goals">Add to a demo goal <ArrowRight /></Link>
     <TrustBadge>Nothing is transferred</TrustBadge>
   </section>;
@@ -350,15 +350,15 @@ export function CoachPage({user}: {user: DemoUser}) {
     const clean = text.trim(); if (!clean || busy) return;
     setMessages((items) => [...items, {id: crypto.randomUUID(), role: 'user', text: clean}]); setQuestion(''); setBusy(true); setError('');
     try { const result = await api<{answer: {text: string; provider: string}; intent: string; structured_context: Record<string, unknown>}>('/coach/chat', {method: 'POST', body: JSON.stringify({question: clean, language: 'en'})}); setMessages((items) => [...items, {id: crypto.randomUUID(), role: 'ai', text: result.answer.text, evidence: result.structured_context, provider: result.answer.provider, intent: result.intent}]); }
-      catch (reason) { setError(reason instanceof Error ? reason.message : 'The coach could not answer.'); }
+      catch (reason) { setError(reason instanceof Error ? reason.message : 'AI Assist could not answer.'); }
     finally { setBusy(false); }
   };
   const submit = (event: FormEvent) => {event.preventDefault(); void ask(question);};
   return <div className="page coach-page">
-    <PageHeader eyebrow="Coach" title="Ask about your own money" description="Grounded in calculated financial activity. You stay in control; AI only explains and suggests." />
+    <PageHeader eyebrow="AI Assist" title="Ask about your own money" description="Grounded in calculated financial activity. You stay in control; AI only explains and suggests." />
     <section className="chat-shell">
-      <header className="chat-header"><CoachAvatar /><span><strong>AI Financial Coach</strong><small><i /> Grounded in your financial activity</small></span><TrustBadge>Informational guidance</TrustBadge></header>
-      <div className="chat-body" ref={chatBody} aria-live="polite">{messages.map((message) => <div className={`chat-message chat-message--${message.role}`} key={message.id}>{message.role === 'ai' && <CoachAvatar />}<div>{message.provider && <Tag tone={message.provider === 'groq_grounded' ? 'ai' : 'neutral'}>{message.provider === 'groq_grounded' ? 'AI explanation' : 'Calculated fallback'}</Tag>}<p>{message.text}</p>{message.evidence && <div className="message-actions"><button className="text-button" onClick={() => setEvidence(message.evidence)}><Eye />See evidence</button>{message.intent === 'spending_analysis' && <Link className="text-button" to="/coach/scenario"><Compass />Try What-If</Link>}</div>}</div></div>)}{busy && <div className="chat-message chat-message--ai"><CoachAvatar /><div className="typing" aria-label="Coach is thinking"><i /><i /><i /></div></div>}{error && <div className="chat-error" role="alert"><span>AI wording is unavailable right now.</span><button onClick={() => {const userMessages=messages.filter((item) => item.role === 'user'); void ask(userMessages[userMessages.length-1]?.text || 'What changed?');}}>Try again</button></div>}</div>
+      <header className="chat-header"><CoachAvatar /><span><strong>AI Assist</strong><small><i /> Grounded in your financial activity</small></span><TrustBadge>Informational guidance</TrustBadge></header>
+      <div className="chat-body" ref={chatBody} aria-live="polite">{messages.map((message) => <div className={`chat-message chat-message--${message.role}`} key={message.id}>{message.role === 'ai' && <CoachAvatar />}<div>{message.provider && <Tag tone={message.provider === 'groq_grounded' ? 'ai' : 'neutral'}>{message.provider === 'groq_grounded' ? 'AI explanation' : 'Calculated fallback'}</Tag>}<p>{message.text}</p>{message.evidence && <div className="message-actions"><button className="text-button" onClick={() => setEvidence(message.evidence)}><Eye />See evidence</button>{message.intent === 'spending_analysis' && <Link className="text-button" to="/coach/scenario"><Compass />Try What-If</Link>}</div>}</div></div>)}{busy && <div className="chat-message chat-message--ai"><CoachAvatar /><div className="typing" aria-label="AI Assist is thinking"><i /><i /><i /></div></div>}{error && <div className="chat-error" role="alert"><span>AI wording is unavailable right now.</span><button onClick={() => {const userMessages=messages.filter((item) => item.role === 'user'); void ask(userMessages[userMessages.length-1]?.text || 'What changed?');}}>Try again</button></div>}</div>
       {messages.length < 3 && <div className="prompt-grid">{prompts.map((prompt) => <button onClick={() => void ask(prompt)} key={prompt}>{prompt}<ArrowRight /></button>)}</div>}
       <form className="chat-composer" onSubmit={submit}><label className="sr-only" htmlFor="coach-question">Ask about your money</label><input id="coach-question" maxLength={500} placeholder="Ask about your money…" value={question} onChange={(event) => setQuestion(event.target.value)} /><button disabled={!question.trim() || busy} aria-label="Send question"><Send /></button></form>
     </section>
