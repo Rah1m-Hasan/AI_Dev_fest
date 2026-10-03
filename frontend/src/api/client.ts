@@ -1,7 +1,6 @@
-// Keep local development requests on the frontend origin. Vite proxies `/api`
-// to the backend, which also works when the frontend is opened through a
-// remote/embedded preview where the browser cannot reach `localhost:8000`.
-const BASE=import.meta.env.VITE_API_URL || '/api/v1';
+// Use one origin in every environment. During local development Vite proxies
+// `/api` to FastAPI; Vercel Services routes it to the backend service.
+const BASE='/api/v1';
 export const token=()=>localStorage.getItem('upay_token');
 export class ApiError extends Error{constructor(message:string,public readonly status:number){super(message)}}
 export async function api<T=Record<string,unknown>>(path:string, init:RequestInit={}):Promise<T>{
