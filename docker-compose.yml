@@ -7,6 +7,11 @@ services:
       POSTGRES_PASSWORD: upay
     ports: ["5432:5432"]
     volumes: [postgres_data:/var/lib/postgresql/data]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U upay -d upay_coach"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
   api:
     build: ./backend
     command: uvicorn app.main:app --host 0.0.0.0 --port 8000
@@ -14,6 +19,8 @@ services:
       DATABASE_URL: postgresql+psycopg://upay:upay@db:5432/upay_coach
       FRONTEND_URL: http://localhost:5173
     ports: ["8000:8000"]
-    depends_on: [db]
+    depends_on:
+      db:
+        condition: service_healthy
 volumes:
   postgres_data:

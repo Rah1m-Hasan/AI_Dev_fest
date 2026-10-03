@@ -5,6 +5,7 @@ __pycache__/
 *.py[cod]
 node_modules/
 dist/
+*.tsbuildinfo
 data/external/**/raw/*
 !data/external/**/README.md
 !data/external/**/metadata.json

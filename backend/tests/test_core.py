@@ -1,11 +1,12 @@
 """Service-level verification kept portable for restricted/offline judge environments."""
 from datetime import date, timedelta
+from decimal import Decimal
 from sqlalchemy import select
 from app.db import Base, engine, SessionLocal
 from app.models import User, SavingsGoal
 from app.services.seed import seed
 from app.services.auth import create_token, decode_token
-from app.services.analytics_service import spending_summary, run_out_analysis, budget_recommendation, goal_plan, forecast, health_score
+from app.services.analytics_service import spending_summary, run_out_analysis, budget_recommendation, goal_plan, forecast, health_score, safe_to_save, simulate_scenario
 from app.services.groq_service import explain
 
 def db_with_demo():
@@ -57,3 +58,43 @@ def test_missing_user_scoped_data_is_not_implicitly_created():
     db=db_with_demo()
     try: assert db.get(User,999999) is None
     finally: db.close()
+
+def test_safe_to_save_breakdown_reconciles_without_double_counting_bills():
+    db=db_with_demo()
+    try:
+        user=db.scalar(select(User).where(User.email=='demo.student@upay.local'))
+        result=safe_to_save(db,user,7); breakdown=result['breakdown']
+        liquidity=max(0,breakdown['available_balance']+breakdown['expected_income']-breakdown['upcoming_bills']-breakdown['typical_spending']-breakdown['safety_buffer'])
+        assert abs(liquidity-breakdown['liquidity_after_needs'])<0.01
+        assert abs(min(liquidity,breakdown['disposable_cash_flow_cap'])-breakdown['estimated_flexibility'])<0.01
+        assert 0<=result['low']<=result['high']
+    finally: db.close()
+
+def test_weekly_reduction_scenario_scales_across_forecast_and_never_mutates_balance():
+    db=db_with_demo()
+    try:
+        user=db.scalar(select(User).where(User.email=='demo.student@upay.local')); original=float(user.account.balance)
+        result=simulate_scenario(db,user,'reduce_spending',500,7)
+        assert result['difference']>500
+        assert result['projected_balance']>result['baseline_balance']
+        assert float(user.account.balance)==original
+    finally: db.close()
+
+def test_budget_categories_are_json_serializable_after_update():
+    from app.main import update_budget
+    from app.schemas import BudgetIn
+    from app.models import Budget
+    db=db_with_demo()
+    try:
+        user=db.scalar(select(User).where(User.email=='demo.student@upay.local'))
+        budget=db.scalar(select(Budget).where(Budget.user_id==user.id,Budget.status=='active'))
+        result=update_budget(budget.id,BudgetIn(total_limit=1000,categories={'Food':Decimal('650.25')}),user,db)
+        assert result['categories']['Food']==650.25
+        assert isinstance(budget.categories['Food'],float)
+    finally: db.close()
+
+def test_required_api_routes_are_registered():
+    from app.main import app
+    paths={route.path for route in app.routes}
+    required={'/api/v1/dashboard/summary','/api/v1/intelligence/overview','/api/v1/transactions/{transaction_id}/context','/api/v1/scenarios/simulate','/api/v1/coach/chat','/api/v1/reports/monthly'}
+    assert required<=paths

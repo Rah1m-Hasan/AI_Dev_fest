@@ -1,5 +1,5 @@
 from datetime import datetime, date
-from sqlalchemy import String, Integer, Float, Boolean, DateTime, Date, ForeignKey, Text, JSON, Index
+from sqlalchemy import String, Integer, Numeric, Boolean, DateTime, Date, ForeignKey, Text, JSON, Index
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from app.db import Base
 
@@ -20,7 +20,7 @@ class Account(Base):
     __tablename__ = "accounts"
     id: Mapped[int] = mapped_column(primary_key=True)
     user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), unique=True, index=True)
-    balance: Mapped[float] = mapped_column(Float, default=0)
+    balance: Mapped[float] = mapped_column(Numeric(14, 2), default=0)
     currency: Mapped[str] = mapped_column(String(3), default="BDT")
     user: Mapped[User] = relationship(back_populates="account")
 
@@ -42,12 +42,12 @@ class Transaction(Base):
     user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
     merchant_name: Mapped[str] = mapped_column(String(120))
     category: Mapped[str] = mapped_column(String(40), index=True)
-    amount: Mapped[float] = mapped_column(Float)
+    amount: Mapped[float] = mapped_column(Numeric(14, 2))
     direction: Mapped[str] = mapped_column(String(10))
     transaction_type: Mapped[str] = mapped_column(String(40))
     timestamp: Mapped[datetime] = mapped_column(DateTime, index=True)
-    balance_before: Mapped[float] = mapped_column(Float)
-    balance_after: Mapped[float] = mapped_column(Float)
+    balance_before: Mapped[float] = mapped_column(Numeric(14, 2))
+    balance_after: Mapped[float] = mapped_column(Numeric(14, 2))
     is_recurring: Mapped[bool] = mapped_column(Boolean, default=False)
     source: Mapped[str] = mapped_column(String(30), default="synthetic_demo")
     description: Mapped[str] = mapped_column(String(180), default="")
@@ -58,7 +58,7 @@ class Budget(Base):
     __tablename__ = "budgets"
     id: Mapped[int] = mapped_column(primary_key=True)
     user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
-    total_limit: Mapped[float] = mapped_column(Float)
+    total_limit: Mapped[float] = mapped_column(Numeric(14, 2))
     period_type: Mapped[str] = mapped_column(String(20), default="monthly")
     start_date: Mapped[date] = mapped_column(Date)
     end_date: Mapped[date] = mapped_column(Date)
@@ -71,24 +71,24 @@ class SavingsGoal(Base):
     id: Mapped[int] = mapped_column(primary_key=True)
     user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
     name: Mapped[str] = mapped_column(String(100))
-    target_amount: Mapped[float] = mapped_column(Float)
-    current_amount: Mapped[float] = mapped_column(Float, default=0)
+    target_amount: Mapped[float] = mapped_column(Numeric(14, 2))
+    current_amount: Mapped[float] = mapped_column(Numeric(14, 2), default=0)
     target_date: Mapped[date] = mapped_column(Date)
     status: Mapped[str] = mapped_column(String(20), default="active")
     user: Mapped[User] = relationship(back_populates="goals")
 
 class BudgetCategory(Base):
     __tablename__ = "budget_categories"
-    id: Mapped[int] = mapped_column(primary_key=True); budget_id: Mapped[int] = mapped_column(ForeignKey("budgets.id"), index=True); category: Mapped[str] = mapped_column(String(40)); limit_amount: Mapped[float] = mapped_column(Float); spent_amount: Mapped[float] = mapped_column(Float, default=0)
+    id: Mapped[int] = mapped_column(primary_key=True); budget_id: Mapped[int] = mapped_column(ForeignKey("budgets.id"), index=True); category: Mapped[str] = mapped_column(String(40)); limit_amount: Mapped[float] = mapped_column(Numeric(14, 2)); spent_amount: Mapped[float] = mapped_column(Numeric(14, 2), default=0)
 class SavingsContribution(Base):
     __tablename__ = "savings_contributions"
-    id: Mapped[int] = mapped_column(primary_key=True); goal_id: Mapped[int] = mapped_column(ForeignKey("savings_goals.id"), index=True); amount: Mapped[float] = mapped_column(Float); contributed_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    id: Mapped[int] = mapped_column(primary_key=True); goal_id: Mapped[int] = mapped_column(ForeignKey("savings_goals.id"), index=True); amount: Mapped[float] = mapped_column(Numeric(14, 2)); contributed_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 class FinancialInsight(Base):
     __tablename__ = "financial_insights"
     id: Mapped[int] = mapped_column(primary_key=True); user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True); insight_type: Mapped[str] = mapped_column(String(40)); evidence: Mapped[dict] = mapped_column(JSON, default=dict); created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 class FinancialHealthSnapshot(Base):
     __tablename__ = "financial_health_snapshots"
-    id: Mapped[int] = mapped_column(primary_key=True); user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True); score: Mapped[float] = mapped_column(Float); explanation_json: Mapped[dict] = mapped_column(JSON, default=dict); created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    id: Mapped[int] = mapped_column(primary_key=True); user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True); score: Mapped[float] = mapped_column(Numeric(5, 2)); explanation_json: Mapped[dict] = mapped_column(JSON, default=dict); created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 class Forecast(Base):
     __tablename__ = "forecasts"
     id: Mapped[int] = mapped_column(primary_key=True); user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True); horizon_days: Mapped[int] = mapped_column(Integer); payload: Mapped[dict] = mapped_column(JSON, default=dict); created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)

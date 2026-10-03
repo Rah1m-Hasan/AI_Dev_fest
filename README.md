@@ -2,7 +2,9 @@
 
 > A hackathon concept prototype for DIU CPC × upay AI Hackathon / AI DEV FEST 2026. **It uses synthetic demo data only and is not an official production upay service.**
 
-Upay AI Financial Coach turns a balance into an understandable financial picture: where money went, what may happen next, and which user-controlled action could be helpful. It does not approve lending, execute transfers, determine eligibility, or provide guaranteed financial outcomes.
+Upay AI Financial Coach is a **concept integration prototype** for a future intelligence layer inside upay. Upay already tells a user what happened; the coach helps explain why it happened, forecast what may happen next, and simulate realistic options before the user decides. It does not approve lending, execute transfers, determine eligibility, or provide guaranteed financial outcomes.
+
+The demo starts on a compact upay-style home, adds **AI Financial Coach** as a service entry, and demonstrates integration points in History, Account/Financial Health, and Offers without claiming access to a production upay API.
 
 ## Problem and solution
 
@@ -19,19 +21,48 @@ flowchart LR
   F --> React
 ```
 
+## Product architecture
+
+```mermaid
+flowchart LR
+  Home[upay-style Home] --> Coach[AI Financial Coach]
+  History[History + Smart Insights] --> Coach
+  Coach --> Pulse[Pulse: understand now]
+  Coach --> Insights[Insights: explain why]
+  Coach --> Plan[Plan: budget and goals]
+  Coach --> Chat[Coach: grounded conversation]
+  Plan --> Scenario[Scenario Lab: explore options]
+  Scenario --> Decision[User decides]
+```
+
+Mobile navigation stays focused on Pulse, Insights, Plan, and Coach. Transactions, Reports, Learn, and Relevant Savings are secondary destinations. Desktop uses the same hierarchy in a compact shell.
+
 ## Features implemented
 
-- Demo login for student, salaried worker, freelancer and small-business personas.
-- Dashboard with live API-backed balance, cash flow, category/weekly charts, health score, forecast, transactions and calculated insight.
+- Demo login for student, salaried worker and freelancer personas.
+- Upay-style host home with a clearly marked AI Financial Coach entry point.
+- Flagship Pulse with API-backed balance, cash flow, Money Pulse, Money Runway, Safe-to-Save, What Changed, upcoming activity, Money Story and recent transactions.
 - Transaction search and authenticated, stored user category correction feedback.
+- History tabs for Transaction Details, Transaction Summary and Smart Insights, plus transaction-level AI context.
 - Deterministic category aggregation, comparison, recurring expense detection and unusual-expense signals.
 - Signature “why did I run out?” evidence calculation before a Groq/fallback explanation.
-- Personalized—not 50/30/20—budget recommendation and user-controlled accept/update workflow.
-- Savings goals with remaining amount, weekly/monthly contribution, cash-flow feasibility and alternatives.
-- 7–30 day rolling-average plus recurring-payment cash-flow forecast.
+- Personalized—not 50/30/20—budget recommendation with accept, customize, reset, validation and explainability.
+- A three-step savings-goal flow with contribution requirement, cash-flow feasibility and scenario-linked alternatives.
+- Timing-aware forecasting: regular income follows its observed monthly cycle; irregular income is conservatively discounted.
+- Scenario Lab with before/after projected balance, safe-to-save change and goal-contribution impact. Scenarios never mutate account data.
 - Explainable 0–100 informational Financial Health Score, explicitly not a credit score.
-- Grounded AI Coach, reports, relevant learning cards, low-budget alerts and behavior-relevant offer explanation.
+- Conversational grounded AI Coach with real input, send/Enter, history, loading and error states, suggested questions, follow-up actions and a human-readable evidence drawer.
+- Dense monthly reports, behavior-triggered learning and transaction-derived relevant savings with opt-in control.
 - Mobile-responsive fintech UI with loading/error/fallback states.
+
+## Signature intelligence
+
+- **Money Pulse:** combines spending comparison, upcoming recurring activity, runway and buffer logic into a neutral status with inspectable drivers.
+- **Money Runway:** simulates balance against recent daily spending, observed income timing and a conservative buffer.
+- **Safe-to-Save:** subtracts forecast spending and a safety buffer, caps the result by prorated recent savings capacity, and returns a range rather than false precision.
+- **What Changed:** compares equal rolling 30-day windows and ranks category changes by impact.
+- **Money Story:** derives income, unusual purchase, category-change, recurring-payment and net-cash-flow events.
+- **Scenario Lab:** reuses forecast and goal math for reversible what-if comparisons.
 
 ## Why AI is used
 
@@ -71,7 +102,7 @@ cp .env.example .env
 npm run dev
 ```
 
-Open `http://localhost:5173`; FastAPI OpenAPI is `http://localhost:8000/docs`.
+Open `http://localhost:5173`; FastAPI OpenAPI is `http://localhost:8000/docs`. Vite proxies `/api` to the backend in development, so embedded previews do not call a hard-coded browser-side API localhost address.
 
 For PostgreSQL:
 
@@ -99,11 +130,16 @@ Never put a server secret in `VITE_*` frontend variables or commit `.env`.
 ## Test and build
 
 ```bash
-cd backend && pytest -q
+cd backend && pytest -q tests/test_core.py
+cd backend && python -m compileall -q app
+cd frontend && npm run lint
+cd frontend && npm run test
 cd frontend && npm run build
 ```
 
-Tests cover authentication/authorization, calculated analytics, run-out evidence and fallback, budget, goal math, forecasting, health-score bounds, and invalid input. Results should be reported only after running them in the target environment.
+`npm run test` intentionally aliases the TypeScript typecheck; Vitest is not installed, so this project does not claim a passing browser unit-test suite. Browser behavior is verified against the running app at the documented mobile, tablet and desktop viewports.
+
+The portable core suite covers authentication, calculated analytics, Safe-to-Save reconciliation/capping, budget JSON persistence, goal math, forecasting, health-score bounds and scenario non-mutation. On the current Python 3.14 environment it passes **9 tests**. The retained async API contract suite is skipped on Python 3.14 because the installed Starlette/AnyIO in-process transport can deadlock; run it normally on Python 3.11–3.13. On Python 3.14, start Uvicorn and use live authenticated HTTP checks as the contract evidence. The final live sweep verifies all three profiles across dashboard, intelligence, spending, transactions, budgets, goals, forecast, health, reports, learning, offers, Coach and all four scenario types.
 
 ## Demo accounts
 
@@ -123,20 +159,23 @@ All figures are marked as historical calculated values, forecasts, or AI/fallbac
 
 ## Evaluation and limitations
 
-See [docs/evaluation.md](docs/evaluation.md) for metrics and no-invented-results policy. This is a synthetic, seed-data prototype: forecast accuracy is not validated against real customers; the frontend does not yet include a full Bangla translated UI; alert persistence and per-user offer preferences are minimal; Alembic needs generated production operations; and gateway rate limiting/audit controls are deployment work.
+See [docs/evaluation.md](docs/evaluation.md) for metrics and no-invented-results policy. This is a synthetic, seed-data prototype: forecast accuracy is not validated against real customers; the frontend does not yet include a full Bangla translated UI; chat history is session-local; offer preferences are demonstrated but not persisted in a production preference store; and production migrations, gateway rate limiting and audit controls remain deployment work. The frontend bundle should be route-split before production delivery.
 
 ## Future controlled upay integration
 
-A future `UpayTransactionProvider` would replace the `SyntheticTransactionProvider` only after user consent, data-minimization/governance approval, anonymization where appropriate, API access, threat modeling and security review. It must remain a user-assistance product, not a consequential decision engine.
+A future `GovernedUpayTransactionProvider` would replace the current `SyntheticTransactionProvider` behind the same analytics boundary only after user consent, data-minimization/governance approval, anonymization where appropriate, API access, threat modeling and security review. The intelligence services, evidence contracts and human-control boundaries remain provider-independent. It must remain a user-assistance product, not a consequential decision engine.
 
 ## 2–4 minute judging flow
 
-1. Select **Arif · Student** and open the dashboard.
-2. Show calculated category/weekly spending and Financial Health (not credit) score.
-3. Open **AI Coach** → “Why is my balance low?”; inspect grounded evidence and fallback/provider badge.
-4. Open **Budget**, accept the personalized plan; it saves via API.
-5. Open **Goals**, create a fund and view feasibility/alternatives.
-6. Open **Reports** and then **Offers** to show useful context rather than pushy marketing.
+1. Select **Samiha · Freelancer** and begin on the upay-style Home.
+2. Tap **AI Financial Coach** and show Money Pulse, Money Runway and the conservative Safe-to-Save range.
+3. Open **What Changed**, then ask Coach: “Why is my balance lower?”
+4. Open **See evidence** to show the period, transaction count, comparison, largest driver and recurring costs.
+5. Ask: “What if I spend ৳500 less per week?” The grounded fallback shows the full 30-day impact.
+6. Open **Scenario Lab** to compare current and changed projections side by side.
+7. Open the savings goal to discuss feasibility, then finish on the monthly report and Money Story.
+
+An optional in-product Demo Tour introduces the same product logic without forcing it on every session.
 
 ## Team and disclosure
 
