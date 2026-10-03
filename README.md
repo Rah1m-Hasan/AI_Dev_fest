@@ -20,6 +20,15 @@ Upay AI Financial Coach is an AI-powered financial guidance and assisted-action 
 
 ---
 
+## Live Deployment
+
+**Frontend:** https://ai-dev-fest.vercel.app  
+**Backend API:** https://backend-kappa-sooty-49.vercel.app
+
+Demo login: `demo.student@upay.local` / `password`
+
+---
+
 ## Problem Statement
 
 MFS users in Bangladesh can perform transactions, but often lack context and guidance about:
