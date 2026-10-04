@@ -128,6 +128,9 @@ def _extract_amount(text: str) -> float | None:
 def _extract_recipient_query(text: str) -> str | None:
     """Extract recipient name/query from text."""
     text = text.lower()
+    # Don't extract from pure intent identifiers like "send_money"
+    if text in {"send_money", "sendmoney", "send money", "mobile_recharge", "bill_payment"}:
+        return None
     # Remove common action words and amounts
     patterns = [
         # Banglish: "Rafi ke 2000 taka pathabo". Keep this before the more
