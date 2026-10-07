@@ -5,7 +5,7 @@ from decimal import Decimal, ROUND_HALF_UP
 from statistics import pstdev
 from sqlalchemy import select
 from sqlalchemy.orm import Session
-from app.models import Transaction, User, Budget, SavingsGoal
+from app.models import Transaction, User, Budget, SavingsGoal, GoalPlanSettings
 
 TRANSFER_TYPES = {"transfer", "internal_transfer"}
 ESSENTIAL_CATEGORIES = {"Bills", "Rent", "Groceries", "Transport", "Healthcare", "Education", "Mobile Recharge"}
@@ -92,15 +92,26 @@ def budget_recommendation(db: Session,user:User):
     total=sum((dec(v) for v in limits.values()),ZERO); essential=sum((dec(v) for k,v in limits.items() if k in ESSENTIAL_CATEGORIES),ZERO)
     return {"recommended_total_spending":amount(total),"essential_budget":amount(essential),"flexible_budget":amount(max(ZERO,total-essential)),"savings_target":amount(savings),"category_limits":limits,"buffer_contribution":amount(buffer),"emergency_buffer":amount(max(Decimal("1000"),income*Decimal("0.1"))),"income_stability":"variable" if variable else "steady","confidence":"medium" if len(history)>=15 else "low","reasoning":"Based on recent income, recurring essentials, observed spending, available buffer, and income stability — not a generic budget rule.","period_income":amount(income),"fixed_recurring_costs":amount(fixed),"allocation_check":{"income":amount(income),"spending":amount(total),"savings":amount(savings),"buffer":amount(buffer)}}
 
-def goal_plan(db:Session,user:User,goal:SavingsGoal):
-    remaining=max(ZERO,dec(goal.target_amount)-dec(goal.current_amount)); days=(goal.target_date-date.today()).days
+def goal_plan(db:Session,user:User,goal:SavingsGoal, *, target_amount=None, target_date=None, planned_monthly_amount=None):
+    """Return an explainable plan. This never transfers money or changes the wallet."""
+    target_amount = dec(target_amount if target_amount is not None else goal.target_amount)
+    target_date = target_date or goal.target_date
+    remaining=max(ZERO,target_amount-dec(goal.current_amount)); days=(target_date-date.today()).days
+    settings = db.scalar(select(GoalPlanSettings).where(GoalPlanSettings.goal_id == goal.id))
+    saved_plan = dec(settings.planned_monthly_amount) if settings and settings.planned_monthly_amount else None
+    selected_plan = dec(planned_monthly_amount) if planned_monthly_amount is not None else saved_plan
+    if goal.status == "paused":
+        return {"goal_id":goal.id,"remaining_amount":amount(remaining),"days_remaining":max(0,days),"recommended_weekly_contribution":0,"recommended_monthly_contribution":0,"comfortable_weekly_low":0,"comfortable_weekly_high":0,"selected_monthly_contribution":amount(selected_plan) if selected_plan else None,"feasible":False,"status":"paused","projected_completion_date":None,"alternatives":[],"basis":"This goal is paused. Resume it when you are ready to set a saving pace."}
     if remaining==ZERO:
-        return {"goal_id":goal.id,"remaining_amount":0,"days_remaining":max(0,days),"recommended_weekly_contribution":0,"recommended_monthly_contribution":0,"feasible":True,"status":"completed","projected_completion_date":date.today().isoformat(),"alternatives":[],"basis":"Goal amount is already funded."}
+        return {"goal_id":goal.id,"remaining_amount":0,"days_remaining":max(0,days),"recommended_weekly_contribution":0,"recommended_monthly_contribution":0,"comfortable_weekly_low":0,"comfortable_weekly_high":0,"selected_monthly_contribution":amount(selected_plan) if selected_plan else None,"feasible":True,"status":"completed","projected_completion_date":date.today().isoformat(),"alternatives":[],"basis":"Goal amount is already funded."}
     if days<=0:
-        return {"goal_id":goal.id,"remaining_amount":amount(remaining),"days_remaining":0,"recommended_weekly_contribution":None,"recommended_monthly_contribution":None,"feasible":False,"status":"deadline_passed","projected_completion_date":None,"alternatives":["Extend the deadline","Lower the target","Review discretionary spending"],"basis":"The target date has passed."}
+        return {"goal_id":goal.id,"remaining_amount":amount(remaining),"days_remaining":0,"recommended_weekly_contribution":0,"recommended_monthly_contribution":0,"comfortable_weekly_low":0,"comfortable_weekly_high":0,"selected_monthly_contribution":amount(selected_plan) if selected_plan else None,"feasible":False,"status":"deadline_passed","projected_completion_date":None,"alternatives":["Extend the deadline","Lower the target","Review discretionary spending"],"basis":"The target date has passed."}
     rec_month=remaining/(Decimal(days)/Decimal("30.44")); rec_week=remaining/(Decimal(days)/Decimal("7")); rec=budget_recommendation(db,user)
     available=dec(rec["savings_target"]); feasible=available>ZERO and rec_month<=available; gap=max(ZERO,rec_month-available)
-    return {"goal_id":goal.id,"remaining_amount":amount(remaining),"days_remaining":days,"recommended_weekly_contribution":amount(rec_week),"recommended_monthly_contribution":amount(rec_month),"feasible":feasible,"status":"on_track" if feasible else "needs_adjustment","projected_completion_date":goal.target_date.isoformat() if feasible else None,"alternatives":[] if feasible else ["Extend the deadline",f"Reduce discretionary spending by about ৳{amount(gap):,.0f} monthly","Lower the target"],"basis":"Historical free cash flow and goal math; this does not create a transfer."}
+    pace = selected_plan if selected_plan and selected_plan > ZERO else available
+    completion = date.today() + timedelta(days=round(float(remaining / pace * Decimal("30.44")))) if pace > ZERO else None
+    status = "on_track" if feasible else "needs_adjustment"
+    return {"goal_id":goal.id,"remaining_amount":amount(remaining),"days_remaining":days,"recommended_weekly_contribution":amount(rec_week),"recommended_monthly_contribution":amount(rec_month),"comfortable_weekly_low":amount(max(ZERO, available * Decimal("0.75") / Decimal("4.345"))),"comfortable_weekly_high":amount(max(ZERO, available / Decimal("4.345"))),"selected_monthly_contribution":amount(selected_plan) if selected_plan else None,"feasible":feasible,"status":status,"projected_completion_date":completion.isoformat() if completion else None,"alternatives":[] if feasible else ["Extend the deadline",f"Reduce discretionary spending by about ৳{amount(gap):,.0f} monthly","Lower the target"],"basis":"Historical free cash flow and goal math; this does not create a transfer."}
 
 def forecast(db:Session,user:User,days:int=30):
     days=max(7,min(30,days)); now=datetime.now(); history=_tx(db,user.id,now-timedelta(days=60),now)
@@ -280,32 +291,153 @@ def money_pulse(db: Session, user: User):
             "source": "deterministic transaction, forecast, and buffer calculations"}
 
 
-def simulate_scenario(db: Session, user: User, kind: str, amount_value: Decimal, days: int = 7):
-    """Pure calculation. Scenario results are never written to balances, budgets, or goals."""
-    amount_value = max(ZERO, dec(amount_value)); days = max(1, min(90, days))
-    baseline_forecast = forecast(db, user, 30)
-    baseline_safe = safe_to_save(db, user)
-    # A spending reduction is entered as a weekly amount and projected across
-    # the 30-day forecast. Other amounts are one-time changes.
-    occurrences = Decimal("30") / Decimal(str(days)) if kind == "reduce_spending" else Decimal("1")
-    scenario_amount = amount_value * occurrences
-    impact = scenario_amount if kind in {"purchase", "income_delay", "save_more"} else -scenario_amount
-    projected = dec(baseline_forecast["expected_closing_balance"]) - impact
-    safe_high = max(ZERO, dec(baseline_safe["high"]) - impact)
-    narrative = {
-        "reduce_spending": f"Reducing spending by ৳{amount_value:,.0f} every {days} days improves the 30-day projection by about ৳{scenario_amount:,.0f}.",
-        "save_more": f"Allocating ৳{amount_value:,.0f} is shown as a demo contribution and reduces near-term flexibility by that amount.",
-        "purchase": f"A ৳{amount_value:,.0f} purchase reduces the projected balance by that amount.",
-        "income_delay": f"Treating ৳{amount_value:,.0f} of expected income as delayed creates a more conservative projection.",
-    }.get(kind, "This scenario uses only deterministic calculation changes.")
+def simulate_scenario(db: Session, user: User, kind: str, amount_value: Decimal, days: int = 30, *, category: str | None = None, event_date: date | None = None, description: str | None = None):
+    """Build a deterministic, in-memory financial scenario.
+
+    This deliberately only reads the account and transaction history.  The
+    timeline is calculated from the same rolling spending and observed-income
+    assumptions used by ``forecast``; nothing is added to the database.
+    """
+    from app.services.safe_to_spend_service import calculate_safe_to_spend
+
+    amount_value = max(ZERO, dec(amount_value))
+    days = max(7, min(90, days))
+    now = datetime.now()
+    history = _tx(db, user.id, now - timedelta(days=60), now)
+    daily_spend = _money(history, False) / Decimal("60")
+    income_rows = [row for row in history if is_income(row)]
+    variable_income = user.persona in {"freelancer", "small business owner"}
+    typical_income = sum((dec(row.amount) for row in income_rows), ZERO) / Decimal(max(1, len(income_rows)))
+    variable_daily_income = _money(history, True) / Decimal("60") * Decimal("0.70")
+    safe_before = calculate_safe_to_spend(db, user)
+    runway_before = money_runway(db, user)
+    monthly = spending_summary(db, user.id)
+    active_budget = db.scalars(select(Budget).where(Budget.user_id == user.id, Budget.status == "active").order_by(Budget.id.desc())).first()
     active_goal = db.scalars(select(SavingsGoal).where(SavingsGoal.user_id == user.id, SavingsGoal.status == "active").order_by(SavingsGoal.target_date)).first()
     goal_before = goal_plan(db, user, active_goal) if active_goal else None
-    monthly_gain = max(ZERO, -impact)
-    weeks_earlier = round(float(monthly_gain / max(dec(goal_before["recommended_weekly_contribution"]), Decimal("1")))) if goal_before else 0
-    return {"kind": kind, "amount": amount(amount_value), "days": days, "projected_balance": amount(projected),
-            "safe_to_save_high": amount(safe_high), "baseline_balance": baseline_forecast["expected_closing_balance"],
-            "baseline_safe_to_save_high": baseline_safe["high"], "difference": amount(-impact),
-            "before": {"projected_balance": baseline_forecast["expected_closing_balance"], "safe_to_save_high": baseline_safe["high"], "goal_target_date": active_goal.target_date.isoformat() if active_goal else None},
-            "after": {"projected_balance": amount(projected), "safe_to_save_high": amount(safe_high), "estimated_goal_weeks_earlier": max(0, weeks_earlier)},
-            "explanation": narrative,
-            "disclaimer": "Scenario only — it does not change your account, budget, or savings goal."}
+
+    # A selected future date never changes the account today. Purchases dated
+    # outside the chosen horizon are still represented as a planned event.
+    scheduled_offset = 0
+    if event_date and kind in {"purchase", "unexpected_expense", "save_more"}:
+        scheduled_offset = max(0, (event_date - now.date()).days)
+
+    def project(project_days: int, test_amount: Decimal = amount_value):
+        """Return paired daily balances without mutating the user's state."""
+        baseline = dec(user.account.balance)
+        simulated = dec(user.account.balance)
+        rows = []
+        runway_day = project_days
+        balance_runway_day = project_days
+        buffer = max(Decimal("1000"), dec(user.account.balance) * Decimal("0.08"))
+        for offset in range(0, project_days + 1):
+            if offset:
+                baseline -= daily_spend
+                simulated -= daily_spend
+                day = now.date() + timedelta(days=offset)
+                if variable_income:
+                    baseline += variable_daily_income
+                    simulated += variable_daily_income
+                elif day.day == 1:
+                    baseline += typical_income
+                    # A delayed salary appears later, rather than vanishing.
+                    if kind == "income_delay":
+                        # Do not add it yet. The matching delayed date below
+                        # adds the same observed income back when in range.
+                        pass
+                    else:
+                        simulated += typical_income
+                if kind == "income_delay" and not variable_income:
+                    # Income that was due on the first arrives after the chosen delay.
+                    source_day = day - timedelta(days=int(test_amount))
+                    if source_day.day == 1 and offset > int(test_amount):
+                        simulated += typical_income
+                if kind == "reduce_spending":
+                    simulated += test_amount / Decimal("7")
+            if kind in {"purchase", "unexpected_expense", "save_more"} and offset == scheduled_offset:
+                simulated -= test_amount
+            if offset and baseline < buffer and balance_runway_day == project_days:
+                balance_runway_day = offset - 1
+            if offset and simulated < buffer and runway_day == project_days:
+                runway_day = offset - 1
+            rows.append({"day": offset, "date": (now.date() + timedelta(days=offset)).isoformat(), "current_balance": amount(baseline), "scenario_balance": amount(simulated)})
+        return rows, max(0, balance_runway_day), max(0, runway_day)
+
+    timeline, baseline_runway, scenario_runway = project(days)
+    # Runway is assessed on a wider horizon than the selected chart.
+    _, baseline_runway_90, scenario_runway_90 = project(90)
+    ending = timeline[-1]
+    immediate_impact = amount_value if kind in {"purchase", "unexpected_expense", "save_more"} and scheduled_offset == 0 else ZERO
+    if kind == "income_delay":
+        immediate_impact = ZERO
+    safe_after = max(ZERO, dec(safe_before["safe_to_spend"]) - immediate_impact)
+    if kind == "reduce_spending":
+        safe_after = dec(safe_before["safe_to_spend"]) + amount_value
+
+    monthly_change = (
+        amount_value if kind in {"purchase", "unexpected_expense"}
+        else -amount_value * Decimal("30") / Decimal("7") if kind == "reduce_spending"
+        else ZERO
+    )
+    monthly_before = dec(monthly["total_spending"])
+    monthly_after = max(ZERO, monthly_before + monthly_change)
+    budget_before = dec(active_budget.total_limit) - monthly_before if active_budget else None
+    budget_after = budget_before - monthly_change if budget_before is not None else None
+
+    # Goal math is a projection only.  A save-more scenario hypothetically
+    # increases the goal fund; one-off costs reduce the available saving pace.
+    goal_impact = None
+    if active_goal and goal_before:
+        goal_current = dec(active_goal.current_amount)
+        goal_after_amount = min(dec(active_goal.target_amount), goal_current + amount_value) if kind == "save_more" else goal_current
+        current_progress = float(goal_current / max(dec(active_goal.target_amount), Decimal("1")) * Decimal("100"))
+        scenario_progress = float(goal_after_amount / max(dec(active_goal.target_amount), Decimal("1")) * Decimal("100"))
+        baseline_pace = max(dec(goal_before["selected_monthly_contribution"] or 0), dec(goal_before["recommended_monthly_contribution"]), Decimal("1"))
+        pace_change = amount_value if kind == "reduce_spending" else -amount_value if kind in {"purchase", "unexpected_expense", "save_more"} else ZERO
+        scenario_pace = max(Decimal("1"), baseline_pace + pace_change)
+        goal_remaining = max(ZERO, dec(active_goal.target_amount) - goal_after_amount)
+        complete_after = date.today() + timedelta(days=round(float(goal_remaining / scenario_pace * Decimal("30.44"))))
+        goal_impact = {
+            "name": active_goal.name, "current_progress": round(current_progress, 1), "scenario_progress": round(scenario_progress, 1),
+            "current_completion": goal_before.get("projected_completion_date"), "scenario_completion": complete_after.isoformat(),
+            "outlook": "improved" if scenario_pace > baseline_pace or goal_after_amount > goal_current else "at_risk" if scenario_pace < baseline_pace else "unchanged",
+        }
+
+    balance_delta = dec(ending["scenario_balance"]) - dec(ending["current_balance"])
+    balance_ratio = abs(balance_delta) / max(dec(user.account.balance), Decimal("1"))
+    impact_level = "high" if safe_after == ZERO or scenario_runway_90 < max(7, runway_before["days"] * .55) or balance_ratio >= Decimal("0.45") else "moderate" if balance_ratio >= Decimal("0.15") or scenario_runway_90 < runway_before["days"] else "low"
+    health_before = health_score(db, user)
+    health_delta = min(Decimal("25"), balance_ratio * Decimal("30"))
+    if kind == "reduce_spending": health_delta = -min(Decimal("12"), amount_value / max(monthly_before, Decimal("1")) * Decimal("12"))
+    health_after = max(0, min(100, int(round(health_before["score"] - float(health_delta)))))
+    label = {"purchase": "spend", "unexpected_expense": "cover an unexpected expense", "reduce_spending": "spend less", "save_more": "set aside more savings", "income_delay": "delay income"}.get(kind, "make this change")
+    explanation = (
+        f"If you {label} by ৳{amount_value:,.0f}, your estimated runway changes from {baseline_runway_90} days to {scenario_runway_90} days."
+        if kind != "income_delay" else f"If income arrives {int(amount_value)} days later, the estimate tests whether your current money can cover the gap."
+    )
+    alternatives = []
+    if kind in {"purchase", "unexpected_expense"}:
+        for ratio, text in ((Decimal("0.67"), "Spend less instead"), (Decimal("0.8"), "Choose a lower-cost option")):
+            alternative_amount = (amount_value * ratio).quantize(Decimal("1"), rounding=ROUND_HALF_UP)
+            alt_timeline, _, alt_runway = project(90, alternative_amount)
+            alternatives.append({"label": text, "amount": amount(alternative_amount), "runway_days": alt_runway, "projected_balance": alt_timeline[min(days, len(alt_timeline) - 1)]["scenario_balance"]})
+
+    # Legacy summary fields remain for existing API consumers; the structured
+    # snapshots above are the source used by the redesigned Scenario Lab.
+    baseline_forecast = forecast(db, user, 30)
+    legacy_projected = dec(baseline_forecast["expected_closing_balance"]) - monthly_change
+    return {
+        "kind": kind, "amount": amount(amount_value), "days": days, "category": category, "description": description,
+        "projected_balance": amount(legacy_projected), "baseline_balance": baseline_forecast["expected_closing_balance"],
+        "difference": amount(legacy_projected - dec(baseline_forecast["expected_closing_balance"])),
+        "current": {"balance": amount(user.account.balance), "safe_to_spend": safe_before["safe_to_spend"], "runway_days": baseline_runway_90, "monthly_spending": amount(monthly_before), "health_score": health_before["score"]},
+        "projected": {"balance": ending["scenario_balance"], "safe_to_spend": amount(safe_after), "runway_days": scenario_runway_90, "monthly_spending": amount(monthly_after), "health_score": health_after},
+        "deltas": {"balance": amount(balance_delta), "safe_to_spend": amount(safe_after - dec(safe_before["safe_to_spend"])), "runway_days": scenario_runway_90 - baseline_runway_90, "monthly_spending": amount(monthly_after - monthly_before), "health_score": health_after - health_before["score"]},
+        "timeline": timeline, "timeline_runway": {"current": baseline_runway, "scenario": scenario_runway},
+        "goal_impact": goal_impact,
+        "budget_impact": {"has_budget": bool(active_budget), "before_remaining": amount(budget_before) if budget_before is not None else None, "after_remaining": amount(budget_after) if budget_after is not None else None, "exceeded_by": amount(max(ZERO, -budget_after)) if budget_after is not None else None},
+        "impact_level": impact_level, "explanation": explanation, "alternatives": alternatives,
+        "warning": "You can still explore this scenario, but the hypothetical expense is greater than your currently available balance." if kind in {"purchase", "unexpected_expense"} and amount_value > dec(user.account.balance) else None,
+        "disclaimer": "Simulation only — no changes will be made to your account.",
+        "basis": "Deterministic projection from your current balance, rolling 60-day spending, observed income timing, budget, goal, and safe-to-spend calculations.",
+    }

@@ -20,8 +20,8 @@ export function Brand({compact = false}: {compact?: boolean}) {
   </div>;
 }
 
-export function Tag({children, tone = 'neutral'}: {children: React.ReactNode; tone?: 'neutral'|'positive'|'warning'|'ai'|'demo'}) {
-  return <span className={`tag tag--${tone}`}>{children}</span>;
+export function Tag({children, tone = 'neutral', className = ''}: {children: React.ReactNode; tone?: 'neutral'|'positive'|'warning'|'ai'|'demo'; className?: string}) {
+  return <span className={`tag tag--${tone} ${className}`}>{children}</span>;
 }
 
 export function TrustBadge({children}: {children: React.ReactNode}) {
@@ -60,7 +60,7 @@ export function EmptyState({title, description}: {title: string; description: st
   return <div className="state-card state-card--empty"><Sparkles aria-hidden="true" /><h2>{title}</h2><p>{description}</p></div>;
 }
 
-export function Sheet({title, children, close, wide = false}: {title: string; children: React.ReactNode; close: () => void; wide?: boolean}) {
+export function Sheet({title, children, close, wide = false, className = ''}: {title: string; children: React.ReactNode; close: () => void; wide?: boolean; className?: string}) {
   const panel = useRef<HTMLElement>(null);
   useEffect(() => {
     const previous = document.activeElement as HTMLElement | null;
@@ -79,7 +79,7 @@ export function Sheet({title, children, close, wide = false}: {title: string; ch
     return () => {window.removeEventListener('keydown', onKey); previous?.focus();};
   }, [close]);
   return <div className="backdrop" role="presentation" onMouseDown={close}>
-    <section className={`sheet ${wide ? 'sheet--wide' : ''}`} ref={panel} role="dialog" aria-modal="true" aria-labelledby="sheet-title" onMouseDown={(event) => event.stopPropagation()}>
+    <section className={`sheet ${wide ? 'sheet--wide' : ''} ${className}`} ref={panel} role="dialog" aria-modal="true" aria-labelledby="sheet-title" onMouseDown={(event) => event.stopPropagation()}>
       <div className="sheet__header"><div><span className="eyebrow">Calculated evidence</span><h2 id="sheet-title">{title}</h2></div><button className="icon-button" onClick={close} aria-label="Close"><X /></button></div>
       <div className="sheet__body">{children}</div>
     </section>

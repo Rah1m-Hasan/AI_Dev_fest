@@ -127,17 +127,40 @@ export type BudgetRecommendation = {
   fixed_recurring_costs: number;
 };
 
+export type MonthlyPlan = {
+  status: 'recommended' | 'customized' | 'accepted';
+  allocations: {essentials: number; flexible: number; savings: number; safety_buffer: number};
+  categories: Record<string, number>;
+  accepted_at: string | null;
+  updated_at: string | null;
+  customized: boolean;
+};
+
+export type PlanWorkspace = {recommendation: BudgetRecommendation; plan: MonthlyPlan};
+
 export type Goal = {
   id: number;
   name: string;
   target_amount: number;
   current_amount: number;
   target_date: string;
+  status: 'active' | 'paused' | 'completed';
+  category: string;
+  saving_preference: 'weekly' | 'monthly' | 'flexible';
+  note?: string | null;
+  planned_monthly_amount?: number | null;
   progress_percent: number;
   plan: {
     recommended_weekly_contribution: number;
     recommended_monthly_contribution: number;
+    comfortable_weekly_low: number;
+    comfortable_weekly_high: number;
+    selected_monthly_contribution?: number | null;
     feasible: boolean;
+    status: 'on_track' | 'needs_adjustment' | 'completed' | 'paused' | 'deadline_passed';
+    remaining_amount: number;
+    days_remaining: number;
+    projected_completion_date?: string | null;
     alternatives: string[];
     basis: string;
   };
@@ -187,6 +210,16 @@ export type SafeToSpend = {
   breakdown: Record<string, number>;
 };
 
+/** Context produced by existing deterministic product calculations for AI Assist to explain. */
+export type ExplainMetricContext = {
+  metricId: 'safe_to_spend' | 'monthly_spending' | 'savings_rate' | 'money_runway' | 'financial_health_score' | 'financial_health_factor' | 'savings_goal_progress' | 'spending_category_change' | 'remaining_budget';
+  title: string;
+  value: number | string;
+  unit?: string;
+  source: string;
+  context?: Record<string, string | number | boolean | null>;
+};
+
 export type IncomeAdaptive = {
   income_last_7_days: number;
   average_weekly_income: number;
@@ -196,3 +229,63 @@ export type IncomeAdaptive = {
   suggested_savings_max: number;
   explanation: string;
 };
+
+// --- Learn types ---
+export type QuizOption = { key: string; text: string };
+export type Quiz = { question: string; options: QuizOption[]; correct_key: string };
+export type LessonCard = {
+  id: number;
+  title: string;
+  summary: string;
+  category: string;
+  difficulty: string;
+  duration_minutes: number;
+  trigger_type: string | null;
+  trigger_reason: string | null;
+  completed: boolean;
+  started: boolean;
+};
+export type LessonDetail = LessonCard & {
+  content: string;
+  content_bn: string | null;
+  personalized_section: string | null;
+  personalized_section_bn: string | null;
+  initial_language?: 'en' | 'bn';
+  quiz: Quiz | null;
+  completed: boolean;
+  started: boolean;
+};
+export type LessonProgressSummary = { category: string; completed: number; total: number };
+export type LearningResponse = {
+  featured: LessonCard | null;
+  for_you: LessonCard[];
+  tabs: string[];
+  progress: LessonProgressSummary[];
+};
+export type LessonCompleteResult = { completed: boolean; quiz_score: number | null };
+
+// --- Offers types ---
+export type OfferCard = {
+  id: number;
+  title: string;
+  terms: string;
+  terms_bn: string | null;
+  category: string;
+  min_spend: number | null;
+  discount_percent: number | null;
+  discount_fixed: number | null;
+  max_discount: number | null;
+  typical_purchase: number | null;
+  typical_merchant: string | null;
+  potential_saving: number | null;
+  expiry_date: string | null;
+  eligibility_notes: string | null;
+  fit_status: 'good_fit' | 'conditional_fit' | 'not_useful' | null;
+  is_saved: boolean;
+  learning_lesson_id: number | null;
+  state?: 'active' | 'upcoming' | 'expired';
+  why_relevant?: string | null;
+};
+export type OfferDetail = OfferCard & { why_relevant: string | null };
+export type OfferPreferences = { personalized_offers_enabled: boolean };
+export type OffersResponse = { offers: OfferCard[]; preferences: OfferPreferences; available_categories: string[]; state: string };

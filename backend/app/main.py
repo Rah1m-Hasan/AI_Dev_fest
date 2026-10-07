@@ -7,8 +7,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import select, func
 from sqlalchemy.orm import Session
 from app.db import Base,engine,get_db
-from app.models import User,Transaction,Budget,SavingsGoal,Notification,CategoryFeedback
-from app.schemas import LoginIn,BudgetIn,GoalIn,ChatIn,CategoryCorrection,ScenarioIn,IntentIn,SendMoneyIn,TrustedContactIn,TrustedHelperIn,HelperRequestIn
+from app.models import User,Transaction,Budget,PlanState,SavingsGoal,SavingsContribution,GoalPlanSettings,Notification,CategoryFeedback,HelperRelationship,HelperActivity,HelperAssistanceRequest,PaymentRequest,TrustedContact,TrustedContactAudit
+from app.schemas import LoginIn,BudgetIn,PlanIn,GoalIn,GoalUpdateIn,GoalPreviewIn,ContributionIn,ChatIn,CategoryCorrection,ScenarioIn,IntentIn,SendMoneyIn,TrustedContactIn,TrustedContactUpdateIn,PaymentRequestIn,TransactionDraftIn,TrustedHelperIn,HelperRequestIn,HelperModeCreateIn,HelperPermissionsIn,HelperRequestReviewIn,HelperAssistancePrepareIn,AssistantMessageIn,AssistantAuthorizeIn,CompleteLessonIn
 from app.api.deps import current_user
 from app.services.auth import create_token
 from app.services.seed import seed
@@ -34,6 +34,39 @@ app.add_middleware(CORSMiddleware,allow_origins=[get_settings().frontend_url],al
 def health(): return {"status":"ok","service":"upay-ai-financial-coach","demo_data":"synthetic"}
 @app.get("/api/v1/system/status")
 def status(): return {"mode":"demo","data":"synthetic only","groq":"server-side optional with deterministic fallback"}
+
+@app.post("/api/v1/assistant/message")
+def assistant_message(body: AssistantMessageIn, user: User = Depends(current_user), db: Session = Depends(get_db)):
+    """One free-form, server-orchestrated entry point for all supported actions."""
+    from app.services.assistant_action_service import explain_metric, get_conversation, handle_message
+    try:
+        conversation = get_conversation(db, user.id, body.conversation_id)
+        if body.explain_metric:
+            return explain_metric(conversation, body.explain_metric.model_dump())
+        return handle_message(db, user, conversation, body.message)
+    except PermissionError:
+        raise HTTPException(404, "Conversation not found")
+
+@app.post("/api/v1/assistant/actions/{action_id}/confirm")
+def assistant_confirm_action(action_id: str, user: User = Depends(current_user), db: Session = Depends(get_db)):
+    from app.services.assistant_action_service import confirm_action
+    try: return confirm_action(db, user, action_id)
+    except PermissionError: raise HTTPException(404, "Action not found")
+    except ValueError as error: raise HTTPException(409, str(error))
+
+@app.post("/api/v1/assistant/actions/{action_id}/authorize")
+def assistant_authorize_action(action_id: str, body: AssistantAuthorizeIn, user: User = Depends(current_user), db: Session = Depends(get_db)):
+    from app.services.assistant_action_service import authorize_action
+    try: return authorize_action(db, user, action_id, body.pin)
+    except PermissionError: raise HTTPException(404, "Action not found")
+    except ValueError as error: raise HTTPException(409, str(error))
+
+@app.delete("/api/v1/assistant/actions/{action_id}")
+def assistant_cancel_action(action_id: str, user: User = Depends(current_user), db: Session = Depends(get_db)):
+    from app.services.assistant_action_service import cancel_action
+    try: return cancel_action(db, user, action_id)
+    except PermissionError: raise HTTPException(404, "Action not found")
+    except ValueError as error: raise HTTPException(409, str(error))
 @app.post("/api/v1/auth/login")
 def login(body:LoginIn,db:Session=Depends(get_db)):
     user=db.scalar(select(User).where(User.email==body.email.lower()))
@@ -66,7 +99,10 @@ def intelligence_safe_to_save(days:int=Query(7,ge=1,le=30),user:User=Depends(cur
 @app.get("/api/v1/intelligence/runway")
 def intelligence_runway(user:User=Depends(current_user),db:Session=Depends(get_db)): return money_runway(db,user)
 @app.post("/api/v1/scenarios/simulate")
-def scenario(body:ScenarioIn,user:User=Depends(current_user),db:Session=Depends(get_db)): return simulate_scenario(db,user,body.kind,body.amount,body.days)
+def scenario(body:ScenarioIn,user:User=Depends(current_user),db:Session=Depends(get_db)):
+    # The service is intentionally read-only: no scenario is ever stored as a
+    # transaction, balance, budget, or savings-goal change.
+    return simulate_scenario(db,user,body.kind,body.amount,body.days,category=body.category,event_date=body.date,description=body.description)
 
 def transaction_out(t): return {"id":t.id,"merchant_name":t.merchant_name,"category":t.category,"amount":amount(t.amount),"direction":t.direction,"transaction_type":t.transaction_type,"timestamp":t.timestamp.isoformat(),"is_recurring":t.is_recurring,"description":t.description,"source":t.source}
 @app.get("/api/v1/transactions")
@@ -156,6 +192,49 @@ def insights(user:User=Depends(current_user),db:Session=Depends(get_db)):
 
 @app.get("/api/v1/budgets/recommendation")
 def budget_rec(user:User=Depends(current_user),db:Session=Depends(get_db)): return budget_recommendation(db,user)
+
+def _plan_out(state: PlanState | None, rec: dict):
+    """Keep all plan numbers deterministic and transparently sourced."""
+    if not state:
+        allocations={"essentials":rec["essential_budget"],"flexible":rec["flexible_budget"],"savings":rec["savings_target"],"safety_buffer":rec["buffer_contribution"]}
+        return {"status":"recommended","allocations":allocations,"categories":rec["category_limits"],"accepted_at":None,"updated_at":None,"customized":False}
+    return {"status":state.status,"allocations":{"essentials":amount(state.essentials),"flexible":amount(state.flexible),"savings":amount(state.savings),"safety_buffer":amount(state.safety_buffer)},"categories":{key:amount(value) for key,value in state.categories.items()},"accepted_at":state.accepted_at.isoformat() if state.accepted_at else None,"updated_at":state.updated_at.isoformat() if state.updated_at else None,"customized":state.status in {"customized","accepted"}}
+
+def _validate_plan_against_income(body: PlanIn, rec: dict):
+    total=body.essentials + body.flexible + body.savings + body.safety_buffer
+    if total > dec(rec["period_income"]):
+        raise HTTPException(422, f"Plan allocations exceed expected income by ৳{amount(total-dec(rec['period_income'])):,.0f}.")
+
+def _plan_state(user:User, db:Session):
+    return db.scalar(select(PlanState).where(PlanState.user_id==user.id))
+
+@app.get("/api/v1/budgets/plan")
+def get_plan(user:User=Depends(current_user),db:Session=Depends(get_db)):
+    rec=budget_recommendation(db,user)
+    return {"recommendation":rec,"plan":_plan_out(_plan_state(user,db),rec)}
+
+@app.put("/api/v1/budgets/plan")
+def save_plan(body:PlanIn,user:User=Depends(current_user),db:Session=Depends(get_db)):
+    rec=budget_recommendation(db,user); _validate_plan_against_income(body,rec)
+    state=_plan_state(user,db) or PlanState(user_id=user.id)
+    state.essentials=body.essentials; state.flexible=body.flexible; state.savings=body.savings; state.safety_buffer=body.safety_buffer
+    state.categories={key:amount(value) for key,value in body.categories.items()}; state.status="customized"; state.accepted_at=None
+    db.add(state); db.commit(); db.refresh(state)
+    return _plan_out(state,rec)
+
+@app.post("/api/v1/budgets/plan/accept")
+def accept_plan(body:PlanIn,user:User=Depends(current_user),db:Session=Depends(get_db)):
+    rec=budget_recommendation(db,user); _validate_plan_against_income(body,rec)
+    for budget in db.scalars(select(Budget).where(Budget.user_id==user.id,Budget.status=="active")):
+        budget.status="replaced"
+    categories={key:amount(value) for key,value in body.categories.items()}
+    budget=Budget(user_id=user.id,total_limit=body.essentials+body.flexible,categories=categories,start_date=date.today()-timedelta(days=29),end_date=date.today())
+    db.add(budget); db.flush()
+    state=_plan_state(user,db) or PlanState(user_id=user.id)
+    state.essentials=body.essentials; state.flexible=body.flexible; state.savings=body.savings; state.safety_buffer=body.safety_buffer; state.categories=categories
+    state.status="accepted"; state.budget_id=budget.id; state.accepted_at=datetime.utcnow()
+    db.add(state); db.commit(); db.refresh(state)
+    return _plan_out(state,rec)
 @app.get("/api/v1/budgets/current")
 def current_budget(user:User=Depends(current_user),db:Session=Depends(get_db)):
     b=db.scalars(select(Budget).where(Budget.user_id==user.id,Budget.status=="active").order_by(Budget.id.desc())).first()
@@ -173,21 +252,79 @@ def update_budget(budget_id:int,body:BudgetIn,user:User=Depends(current_user),db
     if not b or b.user_id!=user.id:raise HTTPException(404,"Budget not found")
     b.total_limit=body.total_limit;b.categories={key:amount(value) for key,value in body.categories.items()};db.commit();return {"id":b.id,"total_limit":amount(b.total_limit),"categories":{key:amount(value) for key,value in b.categories.items()}}
 
+def _goal_or_404(goal_id:int, user:User, db:Session):
+    goal=db.get(SavingsGoal,goal_id)
+    if not goal or goal.user_id!=user.id: raise HTTPException(404,"Goal not found")
+    return goal
+def _goal_settings(goal:SavingsGoal, db:Session):
+    settings=db.scalar(select(GoalPlanSettings).where(GoalPlanSettings.goal_id==goal.id))
+    if not settings:
+        settings=GoalPlanSettings(goal_id=goal.id); db.add(settings); db.flush()
+    return settings
+def _goal_out(goal:SavingsGoal, user:User, db:Session):
+    settings=_goal_settings(goal,db)
+    plan=goal_plan(db,user,goal)
+    return {"id":goal.id,"name":goal.name,"target_amount":amount(goal.target_amount),"current_amount":amount(goal.current_amount),"target_date":goal.target_date.isoformat(),"status":goal.status,"category":settings.category,"saving_preference":settings.saving_preference,"note":settings.note,"planned_monthly_amount":amount(settings.planned_monthly_amount) if settings.planned_monthly_amount else None,"progress_percent":min(100,round(float(goal.current_amount/goal.target_amount*100),1)),"plan":plan}
 @app.get("/api/v1/goals")
-def goals(user:User=Depends(current_user),db:Session=Depends(get_db)): return {"items":[{"id":g.id,"name":g.name,"target_amount":amount(g.target_amount),"current_amount":amount(g.current_amount),"target_date":g.target_date.isoformat(),"status":g.status,"progress_percent":min(100,round(float(g.current_amount/g.target_amount*100),1)),"plan":goal_plan(db,user,g)} for g in db.scalars(select(SavingsGoal).where(SavingsGoal.user_id==user.id).order_by(SavingsGoal.target_date))]}
+def goals(user:User=Depends(current_user),db:Session=Depends(get_db)):
+    items=[_goal_out(g,user,db) for g in db.scalars(select(SavingsGoal).where(SavingsGoal.user_id==user.id).order_by(SavingsGoal.target_date))]
+    db.commit()
+    return {"items":items}
 @app.post("/api/v1/goals")
 def create_goal(body:GoalIn,user:User=Depends(current_user),db:Session=Depends(get_db)):
-    g=SavingsGoal(user_id=user.id,name=body.goal_name.strip(),target_amount=body.target_amount,current_amount=body.optional_current_savings,target_date=body.deadline);db.add(g);db.commit();db.refresh(g);return {"id":g.id,"name":g.name,"plan":goal_plan(db,user,g)}
+    g=SavingsGoal(user_id=user.id,name=body.goal_name.strip(),target_amount=body.target_amount,current_amount=body.optional_current_savings,target_date=body.deadline);db.add(g);db.flush()
+    db.add(GoalPlanSettings(goal_id=g.id,category=body.category.strip(),saving_preference=body.saving_preference,note=body.note.strip() if body.note else None,planned_monthly_amount=body.planned_monthly_amount));db.commit();db.refresh(g);return _goal_out(g,user,db)
 @app.get("/api/v1/goals/{goal_id}")
 def get_goal(goal_id:int,user:User=Depends(current_user),db:Session=Depends(get_db)):
-    g=db.get(SavingsGoal,goal_id)
-    if not g or g.user_id!=user.id:raise HTTPException(404,"Goal not found")
-    return {"id":g.id,"name":g.name,"target_amount":amount(g.target_amount),"current_amount":amount(g.current_amount),"target_date":g.target_date.isoformat(),"plan":goal_plan(db,user,g)}
+    return _goal_out(_goal_or_404(goal_id,user,db),user,db)
 @app.get("/api/v1/goals/{goal_id}/plan")
 def get_goal_plan(goal_id:int,user:User=Depends(current_user),db:Session=Depends(get_db)):
-    g=db.get(SavingsGoal,goal_id)
-    if not g or g.user_id!=user.id:raise HTTPException(404,"Goal not found")
-    return goal_plan(db,user,g)
+    return goal_plan(db,user,_goal_or_404(goal_id,user,db))
+@app.put("/api/v1/goals/{goal_id}")
+def update_goal(goal_id:int,body:GoalUpdateIn,user:User=Depends(current_user),db:Session=Depends(get_db)):
+    goal=_goal_or_404(goal_id,user,db); settings=_goal_settings(goal,db)
+    if body.deadline and body.deadline <= date.today(): raise HTTPException(422,"deadline must be in the future")
+    if body.target_amount is not None:
+        if body.target_amount < dec(goal.current_amount): raise HTTPException(422,"target amount cannot be below saved amount")
+        goal.target_amount=body.target_amount
+    if body.goal_name is not None: goal.name=body.goal_name.strip()
+    if body.deadline is not None: goal.target_date=body.deadline
+    if body.category is not None: settings.category=body.category.strip()
+    if body.saving_preference is not None: settings.saving_preference=body.saving_preference
+    if body.note is not None: settings.note=body.note.strip() or None
+    if body.planned_monthly_amount is not None: settings.planned_monthly_amount=body.planned_monthly_amount
+    db.commit(); db.refresh(goal); return _goal_out(goal,user,db)
+@app.post("/api/v1/goals/{goal_id}/alternatives/preview")
+def preview_goal_change(goal_id:int,body:GoalPreviewIn,user:User=Depends(current_user),db:Session=Depends(get_db)):
+    goal=_goal_or_404(goal_id,user,db)
+    if body.deadline and body.deadline <= date.today(): raise HTTPException(422,"deadline must be in the future")
+    target=body.target_amount if body.target_amount is not None else goal.target_amount
+    if dec(target) < dec(goal.current_amount): raise HTTPException(422,"target amount cannot be below saved amount")
+    return goal_plan(db,user,goal,target_amount=target,target_date=body.deadline or goal.target_date,planned_monthly_amount=body.planned_monthly_amount)
+@app.post("/api/v1/goals/{goal_id}/contributions")
+def add_goal_contribution(goal_id:int,body:ContributionIn,user:User=Depends(current_user),db:Session=Depends(get_db)):
+    goal=_goal_or_404(goal_id,user,db)
+    if goal.status=="paused": raise HTTPException(409,"Resume this goal before adding money")
+    goal.current_amount=dec(goal.current_amount)+body.amount
+    if dec(goal.current_amount)>=dec(goal.target_amount): goal.current_amount=goal.target_amount; goal.status="completed"
+    db.add(SavingsContribution(goal_id=goal.id,amount=body.amount)); db.commit(); return _goal_out(goal,user,db)
+@app.post("/api/v1/goals/{goal_id}/pause")
+def pause_goal(goal_id:int,user:User=Depends(current_user),db:Session=Depends(get_db)):
+    goal=_goal_or_404(goal_id,user,db)
+    if goal.status=="completed": raise HTTPException(409,"Completed goals cannot be paused")
+    goal.status="paused"; db.commit(); return _goal_out(goal,user,db)
+@app.post("/api/v1/goals/{goal_id}/resume")
+def resume_goal(goal_id:int,user:User=Depends(current_user),db:Session=Depends(get_db)):
+    goal=_goal_or_404(goal_id,user,db)
+    if goal.status=="completed": raise HTTPException(409,"Completed goals cannot be resumed")
+    goal.status="active"; db.commit(); return _goal_out(goal,user,db)
+@app.delete("/api/v1/goals/{goal_id}")
+def delete_goal(goal_id:int,user:User=Depends(current_user),db:Session=Depends(get_db)):
+    goal=_goal_or_404(goal_id,user,db)
+    for row in db.scalars(select(SavingsContribution).where(SavingsContribution.goal_id==goal.id)): db.delete(row)
+    settings=db.scalar(select(GoalPlanSettings).where(GoalPlanSettings.goal_id==goal.id))
+    if settings: db.delete(settings)
+    db.delete(goal); db.commit(); return {"deleted":True,"id":goal_id}
 
 @app.get("/api/v1/forecast/cashflow")
 def cash_forecast(days:int=Query(30,ge=7,le=30),user:User=Depends(current_user),db:Session=Depends(get_db)):return forecast(db,user,days)
@@ -217,20 +354,194 @@ def monthly(user:User=Depends(current_user),db:Session=Depends(get_db)):return r
 def report(user,db,period):
     sp=spending_summary(db,user.id,period); now,start,_=period_bounds(period); rows=list(db.scalars(select(Transaction).where(Transaction.user_id==user.id,Transaction.timestamp>=start,Transaction.timestamp<now)).all()); income=sum((dec(t.amount) for t in rows if is_income(t)),dec(0)); expense=dec(sp["total_spending"]); current=current_budget(user,db); goal_data=goals(user,db)
     return {"period":period,"period_range":sp["data_period"],"snapshot":{"income":amount(income),"spent":amount(expense),"net":amount(income-expense)},"spending":sp,"comparison":spending_comparison(db,user),"story":money_story(db,user),"budget":current,"goals":goal_data["items"],"health":health_score(db,user),"forecast":forecast(db,user,14),"observations":[f"{sp['biggest_category']} is the largest category.",f"Recurring costs total ৳{sp['recurring_expenses']:,.0f}.","Figures are calculated from synthetic demo data."],"ai_summary":{"provider":"deterministic","text":f"Your {period}ly expense total is ৳{sp['total_spending']:,.0f}. {spending_comparison(db,user)['summary']}"}}
-@app.get("/api/v1/learning/recommended")
-def learning(user:User=Depends(current_user),db:Session=Depends(get_db)):
-    comparison=spending_comparison(db,user); leading=next((x for x in comparison["categories"] if x["difference"]>0),None)
-    trigger=f"{leading['category']} spending changed {leading['change_percent']:+.0f}% compared with the previous period." if leading and leading["change_percent"] is not None else "Your calculated spending varies from week to week."
-    return {"lessons":[{"id":"weekly-budget","title":"Why weekly limits can be easier than monthly budgets","trigger_reason":trigger,"duration_minutes":2,"content":"Monthly numbers are hard to feel day to day. A weekly target can make changes easier to notice.","action":"Try a weekly category target."},{"id":"buffer","title":"Why a small emergency buffer matters","trigger_reason":f"Your forecast confidence is {money_runway(db,user)['confidence']}.","duration_minutes":2,"content":"A buffer can absorb ordinary timing differences between income and expenses.","action":"Review your safe-to-save range first."}]}
+# === LEARN ENDPOINTS ===
+@app.get("/api/v1/learning/recommendations")
+def learning_recommendations(user: User = Depends(current_user), db: Session = Depends(get_db)):
+    from app.services.learning_service import (
+        get_personalized_lessons, get_progress_summary,
+        get_user_completed_lesson_ids, get_user_started_lesson_ids,
+    )
+    from app.schemas import LessonCardOut, LearningRecommendationsOut
+
+    featured, for_you = get_personalized_lessons(db, user)
+    completed_ids = get_user_completed_lesson_ids(db, user.id)
+    started_ids = get_user_started_lesson_ids(db, user.id)
+    progress = get_progress_summary(db, user.id)
+
+    all_cats = ["For You", "Money Basics", "Saving", "Budgeting", "MFS Basics", "Digital Safety"]
+
+    def card_out(lesson, reason):
+        return {
+            "id": lesson.id,
+            "title": lesson.title,
+            "summary": lesson.summary,
+            "category": lesson.category,
+            "difficulty": lesson.difficulty,
+            "duration_minutes": lesson.duration_minutes,
+            "trigger_type": lesson.trigger_type,
+            "trigger_reason": reason,
+            "completed": lesson.id in completed_ids,
+            "started": lesson.id in started_ids,
+        }
+
+    featured_out = card_out(featured[0][0], featured[0][1]) if featured else None
+    for_you_out = [card_out(l, r) for l, r in for_you]
+
+    return {
+        "featured": featured_out,
+        "for_you": for_you_out,
+        "tabs": all_cats,
+        "progress": progress,
+    }
+
+
+@app.get("/api/v1/learning/lessons")
+def learning_lessons(user: User = Depends(current_user), db: Session = Depends(get_db), category: str | None = None):
+    from app.services.learning_service import get_all_lessons, get_user_completed_lesson_ids
+    from app.schemas import LessonCardOut
+    lessons = get_all_lessons(db, category)
+    completed_ids = get_user_completed_lesson_ids(db, user.id)
+    return {
+        "lessons": [
+            {
+                "id": l.id,
+                "title": l.title,
+                "summary": l.summary,
+                "category": l.category,
+                "difficulty": l.difficulty,
+                "duration_minutes": l.duration_minutes,
+                "trigger_type": l.trigger_type,
+                "trigger_reason": None,
+                "completed": l.id in completed_ids,
+                "started": False,
+            }
+            for l in lessons
+        ]
+    }
+
+
+@app.get("/api/v1/learning/lessons/{lesson_id}")
+def learning_lesson_detail(lesson_id: int, user: User = Depends(current_user), db: Session = Depends(get_db)):
+    from app.services.learning_service import get_lesson_detail
+    from app.schemas import QuizOut, LessonDetailOut
+
+    lesson, progress, reason = get_lesson_detail(db, lesson_id, user.id)
+    if not lesson:
+        raise HTTPException(404, "Lesson not found")
+
+    quiz = None
+    if lesson.quiz and isinstance(lesson.quiz, dict):
+        quiz = {
+            "question": lesson.quiz.get("question", ""),
+            "options": lesson.quiz.get("options", []),
+            "correct_key": lesson.quiz.get("correct_key", ""),
+        }
+
+    return {
+        "id": lesson.id,
+        "title": lesson.title,
+        "summary": lesson.summary,
+        "content": lesson.content,
+        "content_bn": lesson.content_bn,
+        "category": lesson.category,
+        "difficulty": lesson.difficulty,
+        "duration_minutes": lesson.duration_minutes,
+        "personalized_section": lesson.personalized_section,
+        "personalized_section_bn": lesson.personalized_section_bn,
+        "initial_language": "bn" if user.preferred_language == "bn" and lesson.content_bn else "en",
+        "quiz": quiz,
+        "trigger_type": lesson.trigger_type,
+        "trigger_reason": reason,
+        "completed": progress.completed_at is not None if progress else False,
+        "started": progress.started_at is not None if progress else False,
+    }
+
+
+@app.post("/api/v1/learning/{lesson_id}/start")
+def learning_start(lesson_id: int, user: User = Depends(current_user), db: Session = Depends(get_db)):
+    from app.services.learning_service import start_lesson
+    start_lesson(db, user.id, lesson_id)
+    return {"started": True}
+
+
 @app.post("/api/v1/learning/{lesson_id}/complete")
-def lesson_complete(lesson_id:str,user:User=Depends(current_user)):return {"lesson_id":lesson_id,"completed":True}
-@app.get("/api/v1/offers/recommended")
-def offers(user:User=Depends(current_user),db:Session=Depends(get_db)):
-    now,start,_=period_bounds(); rows=list(db.scalars(select(Transaction).where(Transaction.user_id==user.id,Transaction.timestamp>=start,Transaction.category=="Groceries")).all()); purchases=[t for t in rows if is_spending(t)]; typical=sum((dec(t.amount) for t in purchases),dec(0))/max(1,len(purchases)); saving=typical*dec("0.10")
-    items=[] if not purchases else [{"id":"groceries-weekend","merchant":"Shwapno","category":"Groceries","title":"10% grocery offer","terms":"Concept upay offer; minimum spend ৳800.","typical_purchase":amount(typical),"potential_saving":amount(saving),"purchase_count":len(purchases),"why":f"You made {len(purchases)} grocery purchases in the last 30 days."}]
-    return {"opt_in":True,"offers":items,"disclaimer":"If you were already planning this purchase, the offer may reduce the cost."}
-@app.patch("/api/v1/offers/preferences")
-def offers_pref(enabled:bool=True,user:User=Depends(current_user)):return {"personalized_offers_enabled":enabled}
+def learning_complete(lesson_id: int, user: User = Depends(current_user), db: Session = Depends(get_db), body: dict | None = None):
+    from app.services.learning_service import complete_lesson
+    quiz_answer = body.get("quiz_answer") if body else None
+    progress, quiz_score = complete_lesson(db, user.id, lesson_id, quiz_answer)
+    return {"completed": True, "quiz_score": quiz_score}
+
+
+@app.get("/api/v1/learning/progress")
+def learning_progress(user: User = Depends(current_user), db: Session = Depends(get_db)):
+    from app.services.learning_service import get_progress_summary
+    progress = get_progress_summary(db, user.id)
+    return {"categories": progress}
+
+
+# === OFFERS ENDPOINTS ===
+@app.get("/api/v1/offers")
+def offers_list(
+    user: User = Depends(current_user),
+    db: Session = Depends(get_db),
+    category: str | None = None,
+    state: str = "active",
+):
+    from app.services.offers_service import get_all_offers
+    from app.models import Offer
+
+    offers_list, prefs = get_all_offers(db, user.id, category, state)
+    available_categories = sorted(set(db.scalars(select(Offer.category).where(Offer.active == True)).all()))
+    return {
+        "offers": offers_list,
+        "preferences": prefs,
+        "available_categories": available_categories,
+        "state": state,
+    }
+
+
+@app.get("/api/v1/offers/saved")
+def offers_saved(user: User = Depends(current_user), db: Session = Depends(get_db)):
+    from app.services.offers_service import get_saved_offers
+    offers = get_saved_offers(db, user.id)
+    return {"offers": offers}
+
+
+@app.get("/api/v1/offers/{offer_id}")
+def offer_detail(offer_id: int, user: User = Depends(current_user), db: Session = Depends(get_db)):
+    from app.services.offers_service import get_offer_detail
+    offer, is_saved = get_offer_detail(db, offer_id, user.id)
+    if not offer:
+        raise HTTPException(404, "Offer not found")
+    return offer
+
+
+@app.post("/api/v1/offers/{offer_id}/save")
+def offer_save(offer_id: int, user: User = Depends(current_user), db: Session = Depends(get_db)):
+    from app.services.offers_service import save_offer
+    save_offer(db, user.id, offer_id)
+    return {"saved": True}
+
+
+@app.delete("/api/v1/offers/{offer_id}/save")
+def offer_unsave(offer_id: int, user: User = Depends(current_user), db: Session = Depends(get_db)):
+    from app.services.offers_service import unsave_offer
+    unsave_offer(db, user.id, offer_id)
+    return {"saved": False}
+
+
+@app.get("/api/v1/offers/preferences")
+def offers_preferences(user: User = Depends(current_user), db: Session = Depends(get_db)):
+    from app.services.offers_service import _get_user_preference
+    return {"personalized_offers_enabled": _get_user_preference(db, user.id)}
+
+
+@app.put("/api/v1/offers/preferences")
+def offers_preferences_update(user: User = Depends(current_user), db: Session = Depends(get_db), body: dict | None = None):
+    from app.services.offers_service import _update_preference
+    enabled = body.get("enabled", True) if body else True
+    _update_preference(db, user.id, enabled)
+    return {"personalized_offers_enabled": enabled}
 
 # === NEW AI FINANCIAL COACH ENDPOINTS ===
 
@@ -241,30 +552,91 @@ async def coach_parse_intent(body:IntentIn,user:User=Depends(current_user)):
     intent = parse_intent(body.question)
     return {"intent":intent.intent,"recipient_query":intent.recipient_query,"amount":intent.amount,"currency":intent.currency,"confidence":intent.confidence,"language":intent.language}
 
+def _mask_phone(phone: str) -> str:
+    return f"{phone[:3]}••••••{phone[-2:]}" if len(phone) >= 5 else "Hidden number"
+
+def _trusted_activity(db: Session, user_id: int, contact: TrustedContact):
+    transfers = list(db.scalars(select(Transaction).where(Transaction.user_id == user_id, Transaction.merchant_name == contact.name, Transaction.transaction_type == "transfer").order_by(Transaction.timestamp.desc())))
+    requests = list(db.scalars(select(PaymentRequest).where(PaymentRequest.user_id == user_id, PaymentRequest.trusted_contact_id == contact.id).order_by(PaymentRequest.created_at.desc())))
+    activity = ([{"kind":"sent", "amount":float(row.amount), "at":row.timestamp, "label":"Sent"} for row in transfers] + [{"kind":"requested", "amount":float(row.amount), "at":row.created_at, "label":"Requested"} for row in requests])
+    activity.sort(key=lambda row: row["at"], reverse=True)
+    return transfers, requests, activity
+
+def _trusted_contact_out(db: Session, user_id: int, contact: TrustedContact, detail: bool = False):
+    transfers, requests, activity = _trusted_activity(db, user_id, contact)
+    last = activity[0] if activity else None
+    result = {"id":contact.id, "name":contact.name, "phone_number":contact.phone_number if detail else _mask_phone(contact.phone_number), "relationship":contact.relationship, "nickname":contact.nickname, "notes":contact.notes if detail else None, "verification_status":contact.verification_status, "verified_at":contact.verified_at.isoformat() if contact.verified_at else None, "created_at":contact.created_at.isoformat(), "last_interaction": last["at"].isoformat() if last else None, "last_transfer_amount":float(transfers[0].amount) if transfers else None, "last_transfer_date":transfers[0].timestamp.date().isoformat() if transfers else None, "total_transfers":len(transfers), "total_requests":len(requests), "first_interaction":activity[-1]["at"].isoformat() if activity else None}
+    if detail:
+        result["activity"] = [{"kind":row["kind"], "label":row["label"], "amount":row["amount"], "created_at":row["at"].isoformat()} for row in activity[:12]]
+    return result
+
+@app.get("/api/v1/trusted-people")
 @app.get("/api/v1/trusted-contacts")
-def trusted_contacts(user:User=Depends(current_user),db:Session=Depends(get_db)):
+def trusted_contacts(q:str|None=None, status:str|None=None, sort:str="recent", user:User=Depends(current_user),db:Session=Depends(get_db)):
     from app.services.recipient_service import get_trusted_contacts
-    from app.services.relationship_service import classify_relationship
     contacts = get_trusted_contacts(db, user.id)
-    items=[]
-    for c in contacts:
-        history=classify_relationship(db,user.id,c,c.name)
-        trust_label = "Trusted" if c.is_trusted else ("Known" if history.previous_transaction_count else "Needs verification")
-        items.append({"id":c.id,"name":c.name,"phone_number":c.phone_number,"relationship":c.relationship,"nickname":c.nickname,"is_trusted":c.is_trusted,"trust_label":trust_label,"last_transfer_amount":history.last_transaction_amount,"last_transfer_date":history.last_transaction_date})
+    if q:
+        needle=q.strip().lower()
+        contacts=[row for row in contacts if needle in row.name.lower() or needle in row.phone_number or needle in row.relationship.lower() or (row.nickname and needle in row.nickname.lower())]
+    if status in {"verified", "unverified", "needs_review"}: contacts=[row for row in contacts if row.verification_status == status]
+    items=[_trusted_contact_out(db, user.id, row) for row in contacts]
+    if sort == "name": items.sort(key=lambda row: row["name"].lower())
+    else: items.sort(key=lambda row: (row["last_interaction"] is not None, row["last_interaction"] or row["created_at"]), reverse=True)
     return {"items":items}
 
+@app.post("/api/v1/trusted-people")
 @app.post("/api/v1/trusted-contacts")
 def create_trusted_contact(body:TrustedContactIn,user:User=Depends(current_user),db:Session=Depends(get_db)):
     from app.services.recipient_service import add_trusted_contact
-    contact = add_trusted_contact(db, user.id, body.name, body.phone_number, body.relationship, body.nickname, body.is_trusted)
-    return {"id":contact.id,"name":contact.name,"phone_number":contact.phone_number,"relationship":contact.relationship,"nickname":contact.nickname,"is_trusted":contact.is_trusted}
+    try: contact = add_trusted_contact(db, user.id, body.name, body.phone_number, body.relationship, body.nickname, body.notes)
+    except ValueError as error: raise HTTPException(422, str(error))
+    return _trusted_contact_out(db, user.id, contact, detail=True)
 
+@app.get("/api/v1/trusted-people/{contact_id}")
+def trusted_contact_detail(contact_id:int,user:User=Depends(current_user),db:Session=Depends(get_db)):
+    from app.services.recipient_service import contact_or_none
+    contact=contact_or_none(db,user.id,contact_id)
+    if not contact: raise HTTPException(404,"Saved person not found")
+    return _trusted_contact_out(db,user.id,contact,detail=True)
+
+@app.get("/api/v1/trusted-people/{contact_id}/activity")
+def trusted_contact_activity(contact_id:int,user:User=Depends(current_user),db:Session=Depends(get_db)):
+    from app.services.recipient_service import contact_or_none
+    contact=contact_or_none(db,user.id,contact_id)
+    if not contact: raise HTTPException(404,"Saved person not found")
+    return _trusted_contact_out(db,user.id,contact,detail=True)
+
+@app.put("/api/v1/trusted-people/{contact_id}")
+def update_trusted_contact(contact_id:int,body:TrustedContactUpdateIn,user:User=Depends(current_user),db:Session=Depends(get_db)):
+    from app.services.recipient_service import contact_or_none, update_trusted_contact as update_contact
+    contact=contact_or_none(db,user.id,contact_id)
+    if not contact: raise HTTPException(404,"Saved person not found")
+    try: contact=update_contact(db,contact,body.name,body.phone_number,body.relationship,body.nickname,body.notes)
+    except ValueError as error: raise HTTPException(422,str(error))
+    return _trusted_contact_out(db,user.id,contact,detail=True)
+
+@app.post("/api/v1/trusted-people/{contact_id}/verify")
+def verify_trusted_contact(contact_id:int,user:User=Depends(current_user),db:Session=Depends(get_db)):
+    from app.services.recipient_service import contact_or_none, verify_trusted_contact as verify_contact
+    contact=contact_or_none(db,user.id,contact_id)
+    if not contact: raise HTTPException(404,"Saved person not found")
+    return _trusted_contact_out(db,user.id,verify_contact(db,contact),detail=True)
+
+@app.post("/api/v1/trusted-people/{contact_id}/request")
+def create_payment_request(contact_id:int,body:PaymentRequestIn,user:User=Depends(current_user),db:Session=Depends(get_db)):
+    from app.services.recipient_service import contact_or_none
+    contact=contact_or_none(db,user.id,contact_id)
+    if not contact: raise HTTPException(404,"Saved person not found")
+    request=PaymentRequest(user_id=user.id,trusted_contact_id=contact.id,recipient_name=contact.name,recipient_phone=contact.phone_number,amount=body.amount,note=body.note.strip() if body.note else None)
+    db.add(request); db.flush(); db.add(TrustedContactAudit(user_id=user.id,trusted_contact_id=contact.id,event_type="trusted_person_used_for_request")); db.commit(); db.refresh(request)
+    return {"id":request.id,"status":request.status,"created_at":request.created_at.isoformat()}
+
+@app.delete("/api/v1/trusted-people/{contact_id}")
 @app.delete("/api/v1/trusted-contacts/{contact_id}")
 def delete_trusted_contact(contact_id:int,user:User=Depends(current_user),db:Session=Depends(get_db)):
     from app.services.recipient_service import remove_trusted_contact
-    if remove_trusted_contact(db, contact_id, user.id):
-        return {"deleted":True}
-    raise HTTPException(404,"Contact not found")
+    if remove_trusted_contact(db, contact_id, user.id): return {"deleted":True}
+    raise HTTPException(404,"Saved person not found")
 
 @app.get("/api/v1/recipients/search")
 def search_recipients(q:str,user:User=Depends(current_user),db:Session=Depends(get_db)):
@@ -303,11 +675,7 @@ def coach_income_adaptive(user:User=Depends(current_user),db:Session=Depends(get
 
 @app.post("/api/v1/transactions/draft")
 def create_transaction_draft(
-    recipient_id:int|None=None,
-    recipient_name:str="",
-    recipient_phone:str|None=None,
-    amount:float=0,
-    reference:str|None=None,
+    body:TransactionDraftIn,
     user:User=Depends(current_user),
     db:Session=Depends(get_db)
 ):
@@ -316,14 +684,19 @@ def create_transaction_draft(
     from app.services.safe_to_spend_service import calculate_safe_to_spend
     from app.services.recipient_service import get_trusted_contacts
 
-    if amount <= 0:
-        raise HTTPException(400,"Amount must be greater than zero")
-
     contacts = get_trusted_contacts(db, user.id)
-    contact = next((c for c in contacts if c.id == recipient_id), None) if recipient_id else None
-    rel_info = classify_relationship(db, user.id, contact, recipient_name, amount)
+    contact = next((c for c in contacts if c.id == body.recipient_id), None) if body.recipient_id else None
+    if body.recipient_id and not contact: raise HTTPException(404, "Saved person not found")
+    if contact and (body.recipient_name.strip() != contact.name or body.recipient_phone and body.recipient_phone != contact.phone_number):
+        contact.verification_status = "needs_review"; contact.is_trusted = False; db.commit()
+        raise HTTPException(409, "Contact details need review. The recipient information differs from the details you saved.")
+    if contact and contact.verification_status != "verified" and not body.recognition_confirmed:
+        raise HTTPException(409, "Confirm this saved person's phone number before continuing.")
+    rel_info = classify_relationship(db, user.id, contact, body.recipient_name, float(body.amount))
     safe_before = calculate_safe_to_spend(db, user)
-    draft = create_draft(db, user.id, recipient_id, recipient_name, recipient_phone, amount, reference)
+    draft = create_draft(db, user.id, body.recipient_id, body.recipient_name.strip(), contact.phone_number if contact else body.recipient_phone, float(body.amount), body.reference)
+    if contact:
+        db.add(TrustedContactAudit(user_id=user.id, trusted_contact_id=contact.id, event_type="trusted_person_used_for_send")); db.commit()
     return get_draft_summary(db, draft, user, rel_info, safe_before)
 
 @app.get("/api/v1/transactions/draft/active")
@@ -334,8 +707,7 @@ def get_active_draft(user:User=Depends(current_user),db:Session=Depends(get_db))
     draft = get_active_draft(db, user.id)
     if not draft:
         return {"has_active_draft":False}
-    from app.models import TrustedContact
-    contact = db.get(TrustedContact, draft.recipient_id) if draft.recipient_id else None
+    contact = db.scalar(select(TrustedContact).where(TrustedContact.id == draft.recipient_id, TrustedContact.user_id == user.id, TrustedContact.archived_at.is_(None))) if draft.recipient_id else None
     rel_info = classify_relationship(db, user.id, contact, draft.recipient_name, draft.amount)
     safe_before = calculate_safe_to_spend(db, user)
     return {"has_active_draft":True,"draft":get_draft_summary(db, draft, user, rel_info, safe_before)}
@@ -384,22 +756,105 @@ def cancel_draft(draft_id:int,user:User=Depends(current_user),db:Session=Depends
 
 @app.get("/api/v1/trusted-helpers")
 def trusted_helpers(user:User=Depends(current_user),db:Session=Depends(get_db)):
-    from app.services.trusted_helper_service import get_trusted_helpers
-    helpers = get_trusted_helpers(db, user.id)
-    return {"items":[{"id":h.id,"helper_name":h.helper_name,"relationship":h.relationship,"phone":h.phone,"can_view_pending_transaction":h.can_view_pending_transaction,"can_receive_alerts":h.can_receive_alerts,"can_view_balance":h.can_view_balance,"can_view_history":h.can_view_history,"can_initiate":h.can_initiate} for h in helpers]}
+    from app.services.helper_mode_service import output
+    helpers = list(db.scalars(select(HelperRelationship).where(HelperRelationship.owner_user_id == user.id).order_by(HelperRelationship.created_at.desc())))
+    activities = list(db.scalars(select(HelperActivity).where(HelperActivity.owner_user_id == user.id).order_by(HelperActivity.created_at.desc())))
+    latest = {activity.helper_relationship_id: activity for activity in activities if activity.helper_relationship_id is not None}
+    return {"items":[output(helper, latest.get(helper.id)) for helper in helpers]}
 
 @app.post("/api/v1/trusted-helpers")
-def create_trusted_helper(body:TrustedHelperIn,user:User=Depends(current_user),db:Session=Depends(get_db)):
-    from app.services.trusted_helper_service import add_trusted_helper
-    helper = add_trusted_helper(db, user.id, body.helper_name, body.relationship, body.phone, body.can_view_pending_transaction, body.can_receive_alerts, body.can_view_balance, body.can_view_history, body.can_initiate)
-    return {"id":helper.id,"helper_name":helper.helper_name,"relationship":helper.relationship,"phone":helper.phone,"can_view_pending_transaction":helper.can_view_pending_transaction,"can_receive_alerts":helper.can_receive_alerts,"can_view_balance":helper.can_view_balance,"can_view_history":helper.can_view_history,"can_initiate":helper.can_initiate}
+def create_trusted_helper(body:HelperModeCreateIn,user:User=Depends(current_user),db:Session=Depends(get_db)):
+    from app.services.helper_mode_service import create_relationship, output
+    try: helper = create_relationship(db, user, body.helper_name, body.phone, body.relationship, body.permissions)
+    except ValueError as error: raise HTTPException(422, str(error))
+    return output(helper)
 
-@app.delete("/api/v1/trusted-helpers/{helper_id}")
-def delete_trusted_helper(helper_id:int,user:User=Depends(current_user),db:Session=Depends(get_db)):
-    from app.services.trusted_helper_service import remove_trusted_helper
-    if remove_trusted_helper(db, helper_id, user.id):
-        return {"deleted":True}
-    raise HTTPException(404,"Helper not found")
+@app.get("/api/v1/trusted-helpers/{helper_id}")
+def trusted_helper_detail(helper_id:int,user:User=Depends(current_user),db:Session=Depends(get_db)):
+    from app.services.helper_mode_service import relationship_or_none, output
+    helper = relationship_or_none(db, user.id, helper_id)
+    if not helper: raise HTTPException(404, "Helper not found")
+    activity = db.scalar(select(HelperActivity).where(HelperActivity.helper_relationship_id == helper.id).order_by(HelperActivity.created_at.desc()))
+    return output(helper, activity)
+
+@app.put("/api/v1/trusted-helpers/{helper_id}/permissions")
+def update_helper_permissions(helper_id:int, body:HelperPermissionsIn, user:User=Depends(current_user),db:Session=Depends(get_db)):
+    from app.services.helper_mode_service import update_permissions, output
+    try: helper = update_permissions(db, user.id, helper_id, body.permissions)
+    except ValueError as error: raise HTTPException(409, str(error))
+    if not helper: raise HTTPException(404, "Helper not found")
+    return output(helper)
+
+@app.post("/api/v1/trusted-helpers/{helper_id}/revoke")
+def revoke_helper_access(helper_id:int,user:User=Depends(current_user),db:Session=Depends(get_db)):
+    from app.services.helper_mode_service import revoke, output
+    helper = revoke(db, user.id, helper_id)
+    if not helper: raise HTTPException(404, "Helper not found")
+    return output(helper)
+
+@app.get("/api/v1/trusted-helpers/{helper_id}/activity")
+def helper_activity(helper_id:int,user:User=Depends(current_user),db:Session=Depends(get_db)):
+    from app.services.helper_mode_service import relationship_or_none
+    if not relationship_or_none(db, user.id, helper_id): raise HTTPException(404, "Helper not found")
+    rows = list(db.scalars(select(HelperActivity).where(HelperActivity.helper_relationship_id == helper_id).order_by(HelperActivity.created_at.desc()).limit(50)))
+    return {"items":[{"id":row.id,"actor":row.actor,"event_type":row.event_type,"detail":row.detail,"created_at":row.created_at.isoformat()} for row in rows]}
+
+@app.get("/api/v1/helper-activity")
+def all_helper_activity(user:User=Depends(current_user),db:Session=Depends(get_db)):
+    rows = list(db.scalars(select(HelperActivity).where(HelperActivity.owner_user_id == user.id).order_by(HelperActivity.created_at.desc()).limit(30)))
+    return {"items":[{"id":row.id,"helper_id":row.helper_relationship_id,"actor":row.actor,"event_type":row.event_type,"detail":row.detail,"created_at":row.created_at.isoformat()} for row in rows]}
+
+@app.get("/api/v1/helper-requests")
+def helper_requests(user:User=Depends(current_user),db:Session=Depends(get_db)):
+    rows = list(db.scalars(select(HelperAssistanceRequest).where(HelperAssistanceRequest.owner_user_id == user.id, HelperAssistanceRequest.status == "waiting_owner_confirmation").order_by(HelperAssistanceRequest.created_at.desc())))
+    helpers = {item.id:item for item in db.scalars(select(HelperRelationship).where(HelperRelationship.owner_user_id == user.id))}
+    return {"items":[{"id":row.id,"helper_id":row.helper_relationship_id,"helper_name":helpers.get(row.helper_relationship_id).helper_name if helpers.get(row.helper_relationship_id) else "Your helper","request_type":row.request_type,"title":row.title,"detail":row.detail,"status":row.status,"created_at":row.created_at.isoformat()} for row in rows]}
+
+@app.post("/api/v1/helper-requests/{request_id}/review")
+def review_helper_request(request_id:int, body:HelperRequestReviewIn, user:User=Depends(current_user),db:Session=Depends(get_db)):
+    row = db.get(HelperAssistanceRequest, request_id)
+    if not row or row.owner_user_id != user.id: raise HTTPException(404, "Request not found")
+    row.status = body.decision; row.reviewed_at = datetime.utcnow()
+    db.add(HelperActivity(owner_user_id=user.id, helper_relationship_id=row.helper_relationship_id, event_type="assistance_request_reviewed", detail=f"You {body.decision} a request", actor="owner"))
+    db.commit()
+    return {"id":row.id,"status":row.status}
+
+@app.get("/api/v1/helper-access/{relationship_id}/financial-health")
+def helper_financial_health(relationship_id:int,user:User=Depends(current_user),db:Session=Depends(get_db)):
+    """Restricted helper-facing example; server enforcement is independent of UI."""
+    from app.services.helper_mode_service import helper_access, record_activity
+    relationship = helper_access(db, relationship_id, user.id, "view_financial_health")
+    if not relationship: raise HTTPException(403, "This helper does not have access to financial health.")
+    result = health_score(db, db.get(User, relationship.owner_user_id))
+    record_activity(db, relationship.owner_user_id, "helper_viewed_financial_health", relationship.id, f"{relationship.helper_name} viewed Financial Health", actor="helper")
+    db.commit()
+    return {"owner_name":db.get(User, relationship.owner_user_id).display_name,"financial_health":result}
+
+@app.post("/api/v1/helper-access/{relationship_id}/assistance-requests")
+def prepare_assistance_request(relationship_id:int, body:HelperAssistancePrepareIn, user:User=Depends(current_user),db:Session=Depends(get_db)):
+    """A helper may prepare details, never authorize or transmit a payment."""
+    from app.services.helper_mode_service import helper_access, record_activity
+    relationship = helper_access(db, relationship_id, user.id, "prepare_transaction")
+    if not relationship: raise HTTPException(403, "This helper cannot prepare transaction assistance.")
+    request = HelperAssistanceRequest(owner_user_id=relationship.owner_user_id, helper_relationship_id=relationship.id, request_type="prepared_transaction", title=body.title.strip(), detail=body.detail.strip() if body.detail else None)
+    db.add(request)
+    record_activity(db, relationship.owner_user_id, "helper_prepared_transaction", relationship.id, f"{relationship.helper_name} prepared {request.title}", actor="helper")
+    db.commit(); db.refresh(request)
+    return {"id":request.id,"status":request.status,"notice":"Prepared for owner review. No payment has been sent."}
+
+@app.get("/api/v1/helper-invitations")
+def my_helper_invitations(user:User=Depends(current_user),db:Session=Depends(get_db)):
+    """Account-linked invitations only; external phone invitations expose no data."""
+    rows = list(db.scalars(select(HelperRelationship).where(HelperRelationship.helper_user_id == user.id, HelperRelationship.status == "pending").order_by(HelperRelationship.invited_at.desc())))
+    return {"items":[{"id":row.id,"owner_name":db.get(User, row.owner_user_id).display_name,"helper_name":row.helper_name,"relationship":row.relationship,"permissions":row.permissions,"invited_at":row.invited_at.isoformat()} for row in rows]}
+
+@app.post("/api/v1/helper-invitations/{relationship_id}/accept")
+def accept_helper_invitation(relationship_id:int,user:User=Depends(current_user),db:Session=Depends(get_db)):
+    from app.services.helper_mode_service import accept_invitation, output
+    try: relationship = accept_invitation(db, relationship_id, user.id)
+    except ValueError as error: raise HTTPException(409, str(error))
+    if not relationship: raise HTTPException(404, "Invitation not found")
+    return output(relationship)
 
 @app.post("/api/v1/trusted-helper/request")
 def create_helper_request(body:HelperRequestIn,user:User=Depends(current_user),db:Session=Depends(get_db)):

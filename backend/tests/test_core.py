@@ -15,6 +15,7 @@ from app.services.transaction_draft_service import DraftState, create_draft, get
 from app.services.relationship_service import classify_relationship
 from app.services.trusted_helper_service import add_trusted_helper
 from app.services.recipient_service import add_trusted_contact
+from app.services.helper_mode_service import create_relationship, helper_access, revoke, update_permissions
 
 def db_with_demo():
     Base.metadata.create_all(engine)
@@ -153,6 +154,20 @@ def test_trusted_helper_never_receives_payment_authority():
         user=db.scalar(select(User).where(User.email=='demo.student@upay.local'))
         helper=add_trusted_helper(db,user.id,"Nusrat Ahmed","Daughter","01800000000",can_initiate=True)
         assert helper.can_initiate is False
+    finally: db.close()
+
+def test_helper_mode_permissions_are_persisted_and_revocation_stops_access():
+    db=db_with_demo()
+    try:
+        owner=db.scalar(select(User).where(User.email=='demo.student@upay.local'))
+        helper_user=db.scalar(select(User).where(User.email=='demo.salary@upay.local'))
+        relationship=create_relationship(db, owner, "Nadia Islam", "01700000000", "Friend", ["guide_navigation"])
+        relationship.status="active"; relationship.helper_user_id=helper_user.id; db.commit()
+        assert helper_access(db, relationship.id, helper_user.id, "view_financial_health") is None
+        update_permissions(db, owner.id, relationship.id, ["guide_navigation", "view_financial_health"])
+        assert helper_access(db, relationship.id, helper_user.id, "view_financial_health") is not None
+        revoke(db, owner.id, relationship.id)
+        assert helper_access(db, relationship.id, helper_user.id, "view_financial_health") is None
     finally: db.close()
 
 def test_ambiguous_recipient_is_returned_for_user_choice():

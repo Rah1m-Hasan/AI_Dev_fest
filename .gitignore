@@ -31,9 +31,16 @@ htmlcov/
 # =============================================================================
 node_modules/
 frontend/dist/
+frontend/.next/
+frontend/.turbo/
 frontend/.DS_Store
 *.tsbuildinfo
 *.tsbuildinfo.*
+coverage/
+.cache/
+out/
+tmp/
+temp/
 
 # =============================================================================
 # Database files
@@ -78,3 +85,6 @@ site/
 .netlify/
 .vercel
 .env*
+!**/.env.example
+
+

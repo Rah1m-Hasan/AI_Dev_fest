@@ -26,8 +26,8 @@ class RelationshipInfo:
 
 
 def _is_trusted_contact(contact: TrustedContact) -> bool:
-    """Check if a contact is marked as trusted."""
-    return contact.is_trusted
+    """Only an explicit owner confirmation counts as verified context."""
+    return contact.verification_status == "verified"
 
 
 def get_transaction_count_to_recipient(
@@ -79,7 +79,7 @@ def classify_relationship(
         db, user_id, contact.name if contact else recipient_name
     )
 
-    # Determine base classification
+    # History informs context; it never upgrades a person to "verified".
     evidence = []
     relationship_type = "new"
 

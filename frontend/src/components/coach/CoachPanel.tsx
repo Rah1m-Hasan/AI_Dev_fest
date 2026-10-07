@@ -1,829 +1,174 @@
-import { FormEvent, useEffect, useRef, useState } from 'react';
-import { Send, Accessibility, ShieldCheck } from 'lucide-react';
-import {useSearchParams} from 'react-router-dom';
+import {FormEvent, useEffect, useRef, useState} from 'react';
+import {Accessibility, ArrowDown, ArrowRight, ArrowUp, CheckCircle2, LockKeyhole, Sparkles} from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-import { api } from '../../api/client';
-import { CoachAvatar } from '../ui';
-import { Tag, TrustBadge } from '../ui';
-import { QuickActionChips, TransactionDraftCard, TransferReviewCard, SafeToSpendCard, IncomeAdaptiveCard, GuidedProgress, TrustedContactsList, WarningCard, SuccessCard } from './CoachComponents';
-import { PinConfirmationModal } from './PinConfirmationModal';
-import type {DemoUser, IncomeAdaptive, SafeToSpend} from '../../types';
+import {useLocation, useNavigate} from 'react-router-dom';
+import {api} from '../../api/client';
+import {formatBDT, formatValue, type ValueType} from '../../format';
+import {formatExplainMetricValue, isExplainMetricContext, metricExplanationPayload} from '../../metricExplanation';
+import {CoachAvatar} from '../ui';
+import {PinConfirmationModal} from './PinConfirmationModal';
+import {TransactionDraftCard} from './CoachComponents';
+import type {DemoUser, ExplainMetricContext} from '../../types';
 
-type ChatMessageType = {
-  id: string;
-  role: 'user' | 'ai';
-  text: string;
-  cardType?: string;
-  cardData?: unknown;
-  provider?: string;
-  intent?: string;
-};
+type Response = {conversation_id?: string; type: string; message: string; intent?: string; status?: string; data?: Record<string, unknown>; result?: Record<string, unknown>; action?: {id: string; name?: string; status?: string}; preview?: Record<string, unknown>; options?: Array<{id: number; name: string; relationship: string}>; transactions?: Array<{id: number; merchant_name: string; amount: number; direction: string; category: string}>};
+type Message = {id: string; role: 'user' | 'ai'; text?: string; response?: Response};
+type TrustedPayment = {id: number; name: string; phone: string; relationship: string; verification_status: 'verified'|'unverified'|'needs_review'; last_transfer_amount?: number | null; last_transfer_date?: string | null};
+type DirectDraft = {draft_id: number; recipient: {id: number | null; name: string; phone: string | null}; relationship: string; relationship_evidence: string[]; amount: number; fee: number; total: number; balance_after: number; state: string};
+type LearningLessonContext = {type: 'learning_lesson'; lessonId: number; title: string; concept: string};
+const processLabel = 'Understanding your request…';
 
-interface ParsedIntent {
-  intent: string;
-  recipient_query: string | null;
-  amount: number | null;
-  currency: string;
-  confidence: number;
-  language: string;
-}
-
-interface Recipient {
-  id: number;
-  name: string;
-  phone_number: string;
-  relationship: string;
-  is_trusted: boolean;
-}
-
-interface TransactionDraft {
-  recipient_name: string;
-  relationship: string;
-  amount: number;
-  fee: number;
-  total: number;
-  balance_after: number;
-  safe_to_spend_before?: number;
-  safe_to_spend_after?: number;
-  runway_before_days?: number;
-  runway_after_days?: number;
-  relationship_evidence?: string[];
-}
-
-type DraftResponse = {draft_id: number; recipient: {id: number | null; name: string; phone: string | null}; relationship: string; relationship_evidence: string[]; amount: number; fee: number; total: number; available_balance: number; balance_after: number; safe_to_spend_before?: SafeToSpend; safe_to_spend_after?: number; runway_before_days?: number; runway_after_days?: number; state: string};
-
-type FlowState = 'idle' | 'intent_received' | 'recipient_search' | 'awaiting_amount' | 'draft_ready' | 'reviewed' | 'awaiting_pin' | 'completed' | 'awaiting_savings_goal' | 'awaiting_savings_amount' | 'awaiting_savings_deadline';
-
-export function CoachPanel({ user }: { user: DemoUser }) {
-  const [searchParams] = useSearchParams();
-  const [messages, setMessages] = useState<ChatMessageType[]>([]);
-  const [input, setInput] = useState('');
-  const [busy, setBusy] = useState(false);
-  const [flowState, setFlowState] = useState<FlowState>('idle');
-  const [intent, setIntent] = useState<ParsedIntent | null>(null);
-  const [recipients, setRecipients] = useState<Recipient[]>([]);
-  const [selectedRecipient, setSelectedRecipient] = useState<Recipient | null>(null);
-  const [draft, setDraft] = useState<TransactionDraft | null>(null);
-  const [draftId, setDraftId] = useState<number | null>(null);
-  const [showPinModal, setShowPinModal] = useState(false);
-  const [pinError, setPinError] = useState<string | null>(null);
-  const [guided, setGuided] = useState(searchParams.get('guided') === '1');
-  const [executing, setExecuting] = useState(false);
-  const chatBodyRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    if (chatBodyRef.current) {
-      chatBodyRef.current.scrollTop = chatBodyRef.current.scrollHeight;
-    }
-  }, [messages]);
-
-  useEffect(() => {
-    if (guided && !recipients.length) {
-      void api<{items: Recipient[]}>('/trusted-contacts').then((data) => setRecipients(data.items)).catch(() => undefined);
-    }
-  }, [guided, recipients.length]);
-
-  const addMessage = (msg: ChatMessageType) => {
-    setMessages(prev => [...prev, msg]);
+export function CoachPanel({user: _user}: {user: DemoUser}) {
+  const location = useLocation();
+  const navigate = useNavigate();
+  const explainMetric = getExplainMetric(location.state);
+  const learningLesson = getLearningLesson(location.state);
+  const [messages, setMessages] = useState<Message[]>([]), [conversationId, setConversationId] = useState<string>(), [input, setInput] = useState(() => new URLSearchParams(location.search).get('prompt') || ''), [busy, setBusy] = useState(false), [guided, setGuided] = useState(false), [pinAction, setPinAction] = useState<Response>(), [reviewing, setReviewing] = useState<Response>(), [pinError, setPinError] = useState<string>(), [showJump, setShowJump] = useState(false), [trustedPayment, setTrustedPayment] = useState<TrustedPayment>();
+  const viewport = useRef<HTMLDivElement>(null);
+  const explainedLocations = useRef(new Set<string>());
+  const append = (message: Message) => setMessages((items) => [...items, message]);
+  useEffect(() => { const prompt = new URLSearchParams(location.search).get('prompt'); if (prompt && !messages.length) setInput(prompt); }, [location.search, messages.length]);
+  useEffect(() => { const payment = (location.state as {trustedPayment?: TrustedPayment} | null)?.trustedPayment; if (payment) {setTrustedPayment(payment); navigate(location.pathname, {replace: true, state: null});} }, [location.key, location.pathname, location.state, navigate]);
+  useEffect(() => { const node = viewport.current; if (node && !showJump) node.scrollTo({top: node.scrollHeight, behavior: 'smooth'}); }, [messages, busy, showJump]);
+  const send = async (value = input) => {
+    const text = value.trim(); if (!text || busy) return;
+    setInput(''); append({id: crypto.randomUUID(), role: 'user', text}); setBusy(true);
+    try { const response = await api<Response>('/assistant/message', {method: 'POST', body: JSON.stringify({conversation_id: conversationId, message: text})}); setConversationId(response.conversation_id || conversationId); append({id: crypto.randomUUID(), role: 'ai', response}); }
+    catch { append({id: crypto.randomUUID(), role: 'ai', response: {type: 'error', message: 'We could not reach AI Assist. Please try again.'}}); }
+    finally { setBusy(false); }
   };
-
-  const handleQuickAction = async (action: string) => {
-    const textMap: Record<string, string> = {
-      send_money: 'I want to send money',
-      safe_to_spend: 'How much can I safely spend?',
-      spending: 'Why did I spend more?',
-      check_balance: 'What is my current balance?',
-      trusted_people: 'Find someone I trust',
-      income: 'Help me save',
-      runway: 'Will my balance last until my next income?',
-      help: 'Help me with my finances',
-    };
-    await handleSend(textMap[action] || action);
-  };
-
-  const handleSend = async (text?: string) => {
-    const messageText = (text || input).trim();
-    if (!messageText || busy) return;
-
-    setInput('');
-    addMessage({ id: crypto.randomUUID(), role: 'user', text: messageText });
+  const requestExplanation = async (metric: ExplainMetricContext, language?: 'en' | 'bn') => {
+    if (busy) return;
     setBusy(true);
-
-    try {
-      // Handle conversation context - if awaiting recipient, treat as recipient query
-      if (flowState === 'recipient_search') {
-        await handleRecipientQuery(messageText);
-        setBusy(false);
-        return;
-      }
-
-      // Handle conversation context - if awaiting savings goal name
-      if (flowState === 'awaiting_savings_goal') {
-        await handleSavingsGoalQuery(messageText);
-        setBusy(false);
-        return;
-      }
-
-      // Handle conversation context - if awaiting savings amount
-      if (flowState === 'awaiting_savings_amount') {
-        await handleSavingsAmountQuery(messageText);
-        setBusy(false);
-        return;
-      }
-
-      // Handle conversation context - if awaiting savings deadline
-      if (flowState === 'awaiting_savings_deadline') {
-        await handleSavingsDeadlineQuery(messageText);
-        setBusy(false);
-        return;
-      }
-
-      // Parse intent first
-      const intentResult = await api<ParsedIntent>('/coach/parse-intent', {
-        method: 'POST',
-        body: JSON.stringify({ question: messageText, language: 'en' }),
-      });
-
-      setIntent(intentResult);
-
-      if (intentResult.intent === 'send_money' || intentResult.intent === 'guided_send_money') {
-        if (intentResult.intent === 'guided_send_money') setGuided(true);
-        await handleSendMoneyIntent(intentResult, messageText);
-      } else if (intentResult.intent === 'safe_to_spend') {
-        await handleSafeToSpend();
-      } else if (intentResult.intent === 'spending_analysis') {
-        await handleRunOutAnalysis();
-      } else if (intentResult.intent === 'money_runway') {
-        await handleRunway();
-      } else if (intentResult.intent === 'savings_help') {
-        await handleSavingsHelp();
-      } else if (intentResult.intent === 'check_balance') {
-        await handleCheckBalance();
-      } else if (messageText.toLowerCase().includes('income')) {
-        await handleIncome();
-      } else if (intentResult.intent === 'recipient_lookup') {
-        await handleRecipientLookup(intentResult.recipient_query);
-      } else {
-        // Fallback to existing chat
-        await handleFallbackChat(messageText);
-      }
-    } catch (err) {
-      addMessage({
-        id: crypto.randomUUID(),
-        role: 'ai',
-        text: "I couldn't process that right now. Please try again.",
-      });
-    } finally {
-      setBusy(false);
-    }
+    try { const response = await api<Response>('/assistant/message', {method: 'POST', body: JSON.stringify({conversation_id: conversationId, message: `Explain ${metric.title}`, explain_metric: metricExplanationPayload(metric, language)})}); setConversationId(response.conversation_id || conversationId); append({id: crypto.randomUUID(), role: 'ai', response}); }
+    catch { append({id: crypto.randomUUID(), role: 'ai', response: {type: 'error', message: "I couldn't load the explanation right now. You can still ask me about this metric below."}}); }
+    finally { setBusy(false); }
   };
-
-  const handleSendMoneyIntent = async (intent: ParsedIntent, originalText: string) => {
-    // Load trusted contacts
-    const contactsResult = await api<{ items: Recipient[] }>('/trusted-contacts');
-    setRecipients(contactsResult.items);
-
-    if (intent.recipient_query && intent.amount) {
-      // Both recipient and amount provided - create draft directly
-      const resolved = await resolveRecipient(intent.recipient_query);
-      if (resolved.contact) {
-        setSelectedRecipient(resolved.contact);
-        await createDraft(resolved.contact.id, resolved.contact.name, resolved.contact.phone_number, intent.amount);
-      } else {
-        addMessage({
-          id: crypto.randomUUID(),
-          role: 'ai',
-          text: `I understood you want to send ৳${intent.amount.toLocaleString()} to "${intent.recipient_query}". Let me find that person in your contacts...`,
-        });
-        if (resolved.matches.length > 1) {
-          addMessage({
-            id: crypto.randomUUID(),
-            role: 'ai',
-            text: `I found multiple people matching "${intent.recipient_query}". Which did you mean?`,
-            cardType: 'trusted_people',
-            cardData: { contacts: resolved.matches },
-          });
-        } else {
-          addMessage({
-            id: crypto.randomUUID(),
-            role: 'ai',
-            text: `I couldn't find "${intent.recipient_query}" in your trusted contacts. Would you like me to search more broadly or choose someone else?`,
-          });
-        }
-      }
-    } else if (intent.recipient_query) {
-      // Only recipient - ask for amount
-      const resolved = await resolveRecipient(intent.recipient_query);
-      if (resolved.contact) {
-        setSelectedRecipient(resolved.contact);
-        addMessage({
-          id: crypto.randomUUID(),
-          role: 'ai',
-          text: `You usually send money to ${resolved.contact.name} — ${resolved.contact.relationship} · Trusted contact. How much would you like to send?`,
-        });
-        setFlowState('awaiting_amount');
-      } else if (resolved.matches.length > 1) {
-        addMessage({
-          id: crypto.randomUUID(),
-          role: 'ai',
-          text: `I found multiple people matching "${intent.recipient_query}". Which did you mean?`,
-          cardType: 'trusted_people',
-          cardData: { contacts: resolved.matches },
-        });
-      } else {
-        addMessage({
-          id: crypto.randomUUID(),
-          role: 'ai',
-          text: `I couldn't find "${intent.recipient_query}" in your trusted contacts. Could you try a different name?`,
-        });
-      }
-    } else if (intent.amount) {
-      // Only amount - ask for recipient
-      addMessage({
-        id: crypto.randomUUID(),
-        role: 'ai',
-        text: `You want to send ৳${intent.amount.toLocaleString()}. Who would you like to send it to?`,
-        cardType: 'trusted_people',
-        cardData: { contacts: contactsResult.items },
-      });
-      setFlowState('recipient_search');
-    } else {
-      // Neither - ask for recipient first
-      addMessage({
-        id: crypto.randomUUID(),
-        role: 'ai',
-        text: "I can help you send money. Who would you like to send money to?",
-        cardType: 'trusted_people',
-        cardData: { contacts: contactsResult.items },
-      });
-      setFlowState('recipient_search');
-    }
+  useEffect(() => {
+    if (!explainMetric || explainedLocations.current.has(location.key)) return;
+    explainedLocations.current.add(location.key);
+    void requestExplanation(explainMetric);
+  // location.key is a new navigation entry. Tracking it prevents repeat messages from re-renders and focus changes.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [location.key]);
+  const confirm = async (response: Response) => {
+    if (!response.action?.id || busy) return; setBusy(true);
+    try { const next = await api<Response>(`/assistant/actions/${response.action.id}/confirm`, {method: 'POST'}); if (next.type === 'authorization_required') setPinAction({...response, action: next.action}); else append({id: crypto.randomUUID(), role: 'ai', response: next}); setReviewing(undefined); }
+    catch { append({id: crypto.randomUUID(), role: 'ai', response: {type: 'error', message: 'This action could not be confirmed. Please try again.'}}); }
+    finally { setBusy(false); }
   };
-
-  const handleSafeToSpend = async () => {
-    const data = await api<{
-      current_balance: number;
-      upcoming_committed_expenses: number;
-      recommended_reserve: number;
-      safe_to_spend: number;
-      breakdown: Record<string, number>;
-    }>('/coach/safe-to-spend');
-
-    addMessage({
-      id: crypto.randomUUID(),
-      role: 'ai',
-      text: `You have about ৳${data.safe_to_spend.toLocaleString()} available after expected bills, your savings commitment, and a safety reserve. This is an estimate, not a spending guarantee.`,
-      cardType: 'safe_to_spend',
-      cardData: data,
-    });
-  };
-
-  const handleRunOutAnalysis = async () => {
-    const result = await api<{explanation: {text: string; provider: string}}>('/coach/run-out-analysis', {method: 'POST'});
-    addMessage({id: crypto.randomUUID(), role: 'ai', text: result.explanation.text, provider: result.explanation.provider, intent: 'spending_analysis'});
-  };
-
-  const handleRunway = async () => {
-    const data = await api<{runway: {days: number; upcoming: Array<{merchant: string; amount: number}>}}>('/dashboard/summary');
-    const strongest = data.runway.upcoming[0];
-    addMessage({id: crypto.randomUUID(), role: 'ai', text: `At your recent flexible spending pace, your balance may last about ${data.runway.days} days after known commitments.${strongest ? ` The strongest near-term factor is ${strongest.merchant} (about ৳${strongest.amount.toLocaleString()}).` : ''} This is a projection, not a guarantee.`, provider: 'deterministic_fallback', intent: 'money_runway'});
-  };
-
-  const resolveRecipient = async (query: string): Promise<{contact: Recipient | null; matches: Recipient[]}> => {
-    const result = await api<{status: string; contact: Recipient | null; matches: Recipient[]}>(`/recipients/resolve?q=${encodeURIComponent(query)}`);
-    return {contact: result.contact, matches: result.matches};
-  };
-
-  const handleCheckBalance = async () => {
-    addMessage({
-      id: crypto.randomUUID(),
-      role: 'ai',
-      text: `Your current available balance is ৳${user.balance.toLocaleString()}.\n\nIs there anything specific you'd like to know about your finances?`,
-    });
-  };
-
-  const handleIncome = async () => {
-    const data = await api<IncomeAdaptive>('/coach/income-adaptive');
-    addMessage({id: crypto.randomUUID(), role: 'ai', text: data.explanation, cardType: 'income_insight', cardData: data});
-  };
-
-  const handleRecipientLookup = async (query: string | null) => {
-    if (!query) {
-      const contacts = await api<{ items: Recipient[] }>('/trusted-contacts');
-      addMessage({
-        id: crypto.randomUUID(),
-        role: 'ai',
-        text: 'Here are your trusted contacts:',
-        cardType: 'trusted_people',
-        cardData: { contacts: contacts.items },
-      });
-      return;
-    }
-
-    const results = await api<{ items: Recipient[] }>(`/recipients/search?q=${encodeURIComponent(query)}`);
-    if (results.items.length === 1) {
-      const contact = results.items[0];
-      const relInfo = await api(`/recipients/${contact.id}/relationship`);
-      addMessage({
-        id: crypto.randomUUID(),
-        role: 'ai',
-        text: `${contact.name} is your ${contact.relationship}. ${(relInfo as any).evidence?.join(' ') || ''}`,
-      });
-    } else if (results.items.length > 1) {
-      addMessage({
-        id: crypto.randomUUID(), role: 'ai',
-        text: `I found ${results.items.length} contacts matching "${query}". Which one do you mean?`,
-        cardType: 'trusted_people', cardData: {contacts: results.items},
-      });
-    } else {
-      addMessage({
-        id: crypto.randomUUID(),
-        role: 'ai',
-        text: `I couldn't find a contact matching "${query}".`,
-      });
-    }
-  };
-
-  const handleFallbackChat = async (question: string) => {
-    const result = await api<{
-      answer: { text: string; provider: string };
-      intent: string;
-      structured_context: Record<string, unknown>;
-    }>('/coach/chat', {
-      method: 'POST',
-      body: JSON.stringify({ question, language: 'en' }),
-    });
-
-    addMessage({
-      id: crypto.randomUUID(),
-      role: 'ai',
-      text: result.answer.text,
-      provider: result.answer.provider,
-      intent: result.intent,
-    });
-  };
-
-  // Savings goal flow handlers
-  const handleSavingsHelp = async () => {
-    setFlowState('awaiting_savings_goal');
-    addMessage({
-      id: crypto.randomUUID(),
-      role: 'ai',
-      text: "Great! What are you saving for?",
-    });
-  };
-
-  const handleSavingsGoalQuery = async (query: string) => {
-    setFlowState('awaiting_savings_amount');
-    addMessage({
-      id: crypto.randomUUID(),
-      role: 'ai',
-      text: `A ${query} sounds like a good goal. About how much do you need for it?`,
-    });
-  };
-
-  const handleSavingsAmountQuery = async (text: string) => {
-    const match = text.match(/[\d,]+/);
-    if (!match) {
-      addMessage({
-        id: crypto.randomUUID(),
-        role: 'ai',
-        text: "I couldn't understand the amount. Please enter a number like 50000 or 80000.",
-      });
-      return;
-    }
-
-    const amount = parseFloat(match[0].replace(/,/g, ''));
-    if (amount <= 0) {
-      addMessage({
-        id: crypto.randomUUID(),
-        role: 'ai',
-        text: "Please enter an amount greater than zero.",
-      });
-      return;
-    }
-
-    // Store amount and ask for deadline
-    setFlowState('awaiting_savings_deadline');
-    addMessage({
-      id: crypto.randomUUID(),
-      role: 'ai',
-      text: `So you need ৳${amount.toLocaleString()}. When do you want to have it by? (For example, in 6 months)`,
-    });
-  };
-
-  const handleSavingsDeadlineQuery = async (text: string) => {
-    // Try to extract months from text like "6 months", "in 8 months"
-    const monthMatch = text.match(/(\d+)\s*(?:months?|মাস)/i);
-    if (!monthMatch) {
-      addMessage({
-        id: crypto.randomUUID(),
-        role: 'ai',
-        text: "I couldn't understand the timeframe. How many months from now? (For example, 6 months)",
-      });
-      return;
-    }
-
-    const months = parseInt(monthMatch[1], 10);
-    if (months <= 0) {
-      addMessage({
-        id: crypto.randomUUID(),
-        role: 'ai',
-        text: "Please enter a positive number of months.",
-      });
-      return;
-    }
-
-    // Get budget recommendation to calculate feasibility
-    try {
-      const budget = await api<{savings_target: number; period_income: number; essential_budget: number; flexible_budget: number}>('/budgets/recommendation');
-      const goals = await api<{items: Array<{id: number; name: string; target_amount: number; current_amount: number; target_date: string; progress_percent: number; plan: {recommended_weekly_contribution: number; recommended_monthly_contribution: number; feasible: boolean}}>}>('/goals');
-
-      // Extract the goal name from conversation context (we need to track this)
-      const goalName = "Savings Goal"; // Would need to track from earlier
-
-      addMessage({
-        id: crypto.randomUUID(),
-        role: 'ai',
-        text: `Let me calculate a plan for your ${goalName} goal...`,
-      });
-
-      // Navigate to goals page with pre-filled data
-      addMessage({
-        id: crypto.randomUUID(),
-        role: 'ai',
-        text: `Based on your recent spending patterns:\n\n• Monthly savings capacity: ৳${budget.savings_target.toLocaleString()}\n• You could realistically save about ৳${Math.round(budget.savings_target * 0.8).toLocaleString()} per month toward this goal.\n\nTo create this goal with a specific target, visit the Goals page. Would you like me to take you there?`,
-      });
-
-      setFlowState('idle');
-    } catch {
-      addMessage({
-        id: crypto.randomUUID(),
-        role: 'ai',
-        text: "I couldn't calculate a plan right now. Would you like to visit the Goals page to set up your savings goal?",
-      });
-      setFlowState('idle');
-    }
-  };
-
-  const handleRecipientQuery = async (query: string) => {
-    // When in recipient_search state, treat the input as a recipient search
-    const resolved = await resolveRecipient(query);
-    if (resolved.contact) {
-      setSelectedRecipient(resolved.contact);
-      if (intent?.amount) {
-        await createDraft(resolved.contact.id, resolved.contact.name, resolved.contact.phone_number, intent.amount);
-      } else {
-        addMessage({
-          id: crypto.randomUUID(),
-          role: 'ai',
-          text: `You selected ${resolved.contact.name}. How much would you like to send?`,
-        });
-        setFlowState('awaiting_amount');
-      }
-    } else if (resolved.matches.length > 1) {
-      addMessage({
-        id: crypto.randomUUID(),
-        role: 'ai',
-        text: `I found multiple people matching "${query}". Which did you mean?`,
-        cardType: 'trusted_people',
-        cardData: { contacts: resolved.matches },
-      });
-    } else {
-      addMessage({
-        id: crypto.randomUUID(),
-        role: 'ai',
-        text: `I couldn't find "${query}" in your contacts. Would you like to search more broadly?`,
-      });
-    }
-  };
-
-  const createDraft = async (recipientId: number, recipientName: string, recipientPhone: string, amount: number) => {
-    try {
-      const params = new URLSearchParams({recipient_id: String(recipientId), recipient_name: recipientName, recipient_phone: recipientPhone, amount: String(amount)});
-      const draftData = await api<DraftResponse>(`/transactions/draft?${params}`, {method: 'POST'});
-      const safeBefore = draftData.safe_to_spend_before?.safe_to_spend;
-      const presentationDraft: TransactionDraft = {recipient_name: draftData.recipient.name, relationship: draftData.relationship, amount: draftData.amount, fee: draftData.fee, total: draftData.total, balance_after: draftData.balance_after, safe_to_spend_before: safeBefore, safe_to_spend_after: draftData.safe_to_spend_after, runway_before_days: draftData.runway_before_days, runway_after_days: draftData.runway_after_days, relationship_evidence: draftData.relationship_evidence};
-
-      setDraft(presentationDraft);
-      setDraftId(draftData.draft_id);
-      setFlowState('draft_ready');
-
-      // Check if amount exceeds safe-to-spend
-      const impact = await api<{ warning: string | null }>(`/transactions/check-impact?amount=${encodeURIComponent(String(amount))}`, {method: 'POST'});
-
-      addMessage({
-        id: crypto.randomUUID(),
-        role: 'ai',
-        text: `I've prepared the transfer. Please review the details below.`,
-        cardType: 'transaction_draft',
-        cardData: presentationDraft,
-      });
-
-      if (impact.warning) {
-        addMessage({
-          id: crypto.randomUUID(),
-          role: 'ai',
-          text: impact.warning,
-          cardType: 'warning',
-        });
-      }
-    } catch (err) {
-      addMessage({
-        id: crypto.randomUUID(),
-        role: 'ai',
-        text: "I couldn't create the transfer. Please try again.",
-      });
-    }
-  };
-
-  const handleReviewDraft = async () => {
-    if (!draftId) return;
-    try {
-      await api(`/transactions/draft/${draftId}/review`, {method: 'POST'});
-      setFlowState('reviewed');
-      addMessage({id: crypto.randomUUID(), role: 'ai', text: 'Please check the transfer summary. AI Assist cannot confirm it for you.', cardType: 'transaction_review', cardData: draft});
-    } catch {
-      addMessage({id: crypto.randomUUID(), role: 'ai', text: "I couldn't open this transfer for review. Please try again."});
-    }
-  };
-
-  const handleConfirmDraft = async () => {
-    if (!draftId) return;
-    try {
-      await api(`/transactions/draft/${draftId}/confirm`, {method: 'POST'});
-      setPinError(null);
-      setShowPinModal(true);
-      setFlowState('awaiting_pin');
-    } catch (err) {
-      addMessage({
-        id: crypto.randomUUID(),
-        role: 'ai',
-        text: "I couldn't confirm the transfer. Please try again.",
-      });
-    }
-  };
-
-  const handlePinSubmit = async (pin: string) => {
-    if (!draftId) return;
-    setExecuting(true);
-    try {
-      const result = await api<{ success: boolean; message: string; balance_after?: number }>(
-        `/transactions/draft/${draftId}/execute`,
-        {
-          method: 'POST',
-          body: JSON.stringify({ draft_id: draftId, pin }),
-        }
-      );
-
-      setShowPinModal(false);
-
-      if (result.success) {
-        setFlowState('completed');
-        addMessage({
-          id: crypto.randomUUID(),
-          role: 'ai',
-          text: `৳${draft?.amount.toLocaleString()} was sent successfully in this demo.\n\nBalance: ৳${result.balance_after?.toLocaleString()}`,
-          cardType: 'success',
-        });
-      } else {
-        setPinError(result.message);
-      }
-    } catch (err) {
-      setPinError("Incorrect PIN. Please try again.");
-    } finally {
-      setExecuting(false);
-    }
-  };
-
-  const cancelDraft = async () => {
-    if (draftId) await api(`/transactions/draft/${draftId}`, {method: 'DELETE'}).catch(() => undefined);
-    setDraft(null); setDraftId(null); setFlowState('idle');
-    addMessage({id: crypto.randomUUID(), role: 'ai', text: 'This transfer draft was cancelled. No money was moved.'});
-  };
-
-  const handleSelectRecipient = (recipient: Recipient) => {
-    setSelectedRecipient(recipient);
-    if (flowState === 'recipient_search' || flowState === 'awaiting_amount') {
-      if (intent?.amount) {
-        createDraft(recipient.id, recipient.name, recipient.phone_number, intent.amount);
-      } else {
-        addMessage({
-          id: crypto.randomUUID(),
-          role: 'ai',
-          text: `You selected ${recipient.name}. How much would you like to send?`,
-        });
-        setFlowState('awaiting_amount');
-      }
-    }
-  };
-
-  const startGuidedRecipient = (recipient: Recipient) => {
-    setSelectedRecipient(recipient);
-    setFlowState('awaiting_amount');
-    addMessage({id: crypto.randomUUID(), role: 'ai', text: `You chose ${recipient.name}. How much would you like to send?`});
-  };
-
-  const handleAmountInput = async (text: string) => {
-    const match = text.match(/[\d,]+/);
-    if (!match) {
-      addMessage({
-        id: crypto.randomUUID(),
-        role: 'ai',
-        text: "I couldn't understand the amount. Please enter a number like 500 or 2000.",
-      });
-      return;
-    }
-
-    const amount = parseFloat(match[0].replace(/,/g, ''));
-    if (amount <= 0) {
-      addMessage({
-        id: crypto.randomUUID(),
-        role: 'ai',
-        text: "Please enter an amount greater than zero.",
-      });
-      return;
-    }
-
-    if (selectedRecipient) {
-      await createDraft(selectedRecipient.id, selectedRecipient.name, selectedRecipient.phone_number, amount);
-    } else {
-      addMessage({
-        id: crypto.randomUUID(),
-        role: 'ai',
-        text: "Who would you like to send ৳" + amount.toLocaleString() + " to?",
-      });
-      setFlowState('recipient_search');
-    }
-  };
-
-  const handleSubmit = (e: FormEvent) => {
-    e.preventDefault();
-    if (flowState === 'awaiting_amount') {
-      handleAmountInput(input);
-    } else {
-      void handleSend();
-    }
-  };
-
-  return (
-    <div className={`coach-page ai-assist-page ${guided ? 'ai-assist-page--guided' : ''}`}>
-      <div className="ai-assist-intro"><div><span className="eyebrow">UPAY AI ASSIST</span><h1>{guided ? 'Let’s do this one step at a time.' : 'AI Assist'}</h1><p>{guided ? 'Large, simple steps for a secure transfer. You can go back or cancel at any time.' : 'Your money, made clearer.'}</p></div><button className="guided-toggle" onClick={() => setGuided(!guided)}><Accessibility />{guided ? 'Guided Mode on' : 'Try Guided Mode'}</button></div>
-      {guided && <GuidedProgress step={flowState === 'idle' || flowState === 'recipient_search' ? 1 : flowState === 'awaiting_amount' ? 2 : flowState === 'draft_ready' ? 3 : 4} total={4} label={flowState === 'draft_ready' ? 'Review transfer' : flowState === 'awaiting_pin' ? 'Confirm securely' : 'Send money'} />}
-      <section className="chat-shell">
-        <header className="chat-header">
-          <CoachAvatar />
-          <span>
-            <strong>AI Assist</strong>
-            <small><i /> Grounded in your financial activity</small>
-          </span>
-          <TrustBadge>Informational guidance</TrustBadge>
-        </header>
-
-        <div className="chat-body" ref={chatBodyRef} aria-live="polite">
-          {!messages.length && !busy && (guided ? <div className="guided-start">
-            <span className="eyebrow">STEP 1</span><h2>Who do you want to send money to?</h2><p>Choose a saved person, or search your contacts.</p>
-            <div className="guided-start__choices">{recipients.slice(0, 2).map((recipient) => <button key={recipient.id} onClick={() => startGuidedRecipient(recipient)}><span className="trusted-contact-avatar">{recipient.name.split(' ').map((part) => part[0]).join('').slice(0, 2)}</span><span><strong>{recipient.name}</strong><small>{recipient.relationship}</small></span></button>)}<button onClick={() => void handleQuickAction('send_money')}><span className="trusted-contact-avatar">+</span><span><strong>Search contact</strong><small>Choose someone else</small></span></button></div>
-          </div> : <div className="ai-assist-welcome">
-            <span className="ai-assist-welcome__mark"><ShieldCheck /></span>
-            <span className="eyebrow">UPAY AI ASSIST</span>
-            <h2>How can I help?</h2>
-            <p>I can prepare a payment, explain recent spending, or help you make a simple plan. You review every money action.</p>
-          </div>)}
-          {messages.map((msg) => (
-            <div key={msg.id} className={`chat-message chat-message--${msg.role}`}>
-              {msg.role === 'ai' && <CoachAvatar />}
-              <div>
-                {msg.provider && (
-                  <Tag tone={msg.provider === 'groq_grounded' ? 'ai' : 'neutral'}>
-                    {msg.provider === 'groq_grounded' ? 'AI explanation' : 'Calculated fallback'}
-                  </Tag>
-                )}
-                {msg.role === 'ai' ? (
-                  <div className="chat-markdown">
-                  <ReactMarkdown
-                    remarkPlugins={[remarkGfm]}
-                    components={{
-                      h1: ({children}) => <h1 className="text-lg font-semibold mt-4 mb-2">{children}</h1>,
-                      h2: ({children}) => <h2 className="text-base font-semibold mt-4 mb-2">{children}</h2>,
-                      h3: ({children}) => <h3 className="text-sm font-semibold mt-3 mb-1.5 text-slate-800">{children}</h3>,
-                      p: ({children}) => <p className="text-sm leading-6 text-slate-600 mb-3">{children}</p>,
-                      strong: ({children}) => <strong className="font-semibold text-slate-800">{children}</strong>,
-                      ul: ({children}) => <ul className="list-disc pl-5 space-y-1.5 mb-3">{children}</ul>,
-                      ol: ({children}) => <ol className="list-decimal pl-5 space-y-1.5 mb-3">{children}</ol>,
-                      li: ({children}) => <li className="text-sm leading-6 text-slate-600">{children}</li>,
-                      blockquote: ({children}) => <blockquote className="border-l-2 border-sky-300 pl-3 text-slate-500">{children}</blockquote>,
-                      code: ({className, children}) => {
-                        const isInline = !className;
-                        return isInline
-                          ? <code className="rounded bg-slate-100 px-1 py-0.5 text-xs">{children}</code>
-                          : <code className={className}>{children}</code>;
-                      },
-                      pre: ({children}) => <pre className="overflow-x-auto rounded-lg bg-slate-900 p-3 text-sm my-3">{children}</pre>,
-                      a: ({href, children}) => <a href={href} className="text-blue-600 hover:underline" target="_blank" rel="noopener noreferrer">{children}</a>,
-                      table: ({children}) => <div className="overflow-x-auto my-3"><table className="min-w-full text-sm">{children}</table></div>,
-                      th: ({children}) => <th className="border border-slate-200 px-3 py-2 text-left font-semibold">{children}</th>,
-                      td: ({children}) => <td className="border border-slate-200 px-3 py-2">{children}</td>,
-                    }}
-                  >
-                    {msg.text}
-                  </ReactMarkdown>
-                  </div>
-                ) : (
-                  <p className="text-sm leading-6 text-white">{msg.text}</p>
-                )}
-
-                {msg.cardType === 'transaction_draft' && !!msg.cardData && (
-                  <div className="chat-card">
-                    <TransactionDraftCard
-                      draft={msg.cardData as TransactionDraft}
-                      onReview={flowState === 'draft_ready' ? handleReviewDraft : undefined}
-                      onCancel={() => void cancelDraft()}
-                    />
-                  </div>
-                )}
-
-                {msg.cardType === 'transaction_review' && !!msg.cardData && <div className="chat-card"><TransferReviewCard draft={msg.cardData as TransactionDraft} onConfirm={handleConfirmDraft} onCancel={() => void cancelDraft()} /></div>}
-
-                {msg.cardType === 'safe_to_spend' && !!msg.cardData && (
-                  <div className="chat-card">
-                    <SafeToSpendCard data={msg.cardData as SafeToSpend} />
-                  </div>
-                )}
-
-                {msg.cardType === 'trusted_people' && !!msg.cardData && (
-                  <div className="chat-card">
-                    <TrustedContactsList
-                      contacts={(msg.cardData as {contacts: Recipient[]}).contacts}
-                      onSelect={(id) => {
-                        const contact = (msg.cardData as {contacts: Recipient[]}).contacts.find((c) => c.id === id);
-                        if (contact) handleSelectRecipient(contact);
-                      }}
-                    />
-                  </div>
-                )}
-
-                {msg.cardType === 'warning' && (
-                  <div className="chat-card">
-                    <WarningCard message={msg.text} />
-                  </div>
-                )}
-
-                {msg.cardType === 'income_insight' && !!msg.cardData && <div className="chat-card"><IncomeAdaptiveCard data={msg.cardData as IncomeAdaptive} /></div>}
-
-                {msg.cardType === 'success' && (
-                  <div className="chat-card">
-                    <SuccessCard message={msg.text} />
-                  </div>
-                )}
-              </div>
-            </div>
-          ))}
-
-          {busy && (
-            <div className="chat-message chat-message--ai">
-              <CoachAvatar />
-              <div className="typing" aria-label="AI Assist is thinking">
-                <i /><i /><i />
-              </div>
-            </div>
-          )}
+  const cancel = async (response: Response) => { if (!response.action?.id) return; setReviewing(undefined); try { append({id: crypto.randomUUID(), role: 'ai', response: await api<Response>(`/assistant/actions/${response.action.id}`, {method: 'DELETE'})}); } catch { append({id: crypto.randomUUID(), role: 'ai', response: {type: 'error', message: 'This action could not be cancelled.'}}); } };
+  const authorize = async (pin: string) => { if (!pinAction?.action?.id) return; setBusy(true); try { const next = await api<Response>(`/assistant/actions/${pinAction.action.id}/authorize`, {method: 'POST', body: JSON.stringify({pin})}); if (next.type === 'error') { setPinError(next.message); return; } setPinAction(undefined); append({id: crypto.randomUUID(), role: 'ai', response: next}); } catch { setPinError('PIN verification failed. Please try again.'); } finally { setBusy(false); } };
+  const onScroll = () => { const node = viewport.current; if (node) setShowJump(node.scrollHeight - node.scrollTop - node.clientHeight > 120); };
+  return <div className={`coach-page ai-assist-page ${messages.length ? 'ai-assist-page--active' : 'ai-assist-page--empty'} ${guided ? 'ai-assist-page--guided' : ''}`}>
+    <section className="assist-workspace" aria-label="AI Assist conversation">
+      <button className="workspace-guided-toggle" type="button" aria-pressed={guided} onClick={() => setGuided(!guided)}><Accessibility />{guided ? 'Guided mode on' : 'Guided mode'}</button>
+      <div className="conversation-viewport" ref={viewport} onScroll={onScroll} aria-live="polite">
+        <div className="conversation-column">
+          {explainMetric && <ExplainingContext metric={explainMetric} busy={busy} explainInBangla={() => void requestExplanation(explainMetric, 'bn')} />}
+          {!messages.length && !explainMetric && (learningLesson ? <LearningContext lesson={learningLesson} /> : <Welcome ask={(prompt) => void send(prompt)} />)}
+          {messages.map((message) => <MessageBlock key={message.id} message={message} review={() => setReviewing(message.response)} cancel={() => message.response && void cancel(message.response)} select={(name) => void send(`Send ${Number(message.response?.preview?.amount || 0)} taka to ${name}`)} />)}
+          {busy && <Processing />}
         </div>
+      </div>
+      {showJump && <button className="jump-latest" onClick={() => {viewport.current?.scrollTo({top: viewport.current.scrollHeight, behavior: 'smooth'}); setShowJump(false);}}><ArrowDown />Jump to latest</button>}
+      <div className="composer-area"><Composer input={input} busy={busy} setInput={setInput} submit={() => void send()} /></div>
+    </section>
+    {reviewing && <ConfirmationCard response={reviewing} back={() => setReviewing(undefined)} confirm={() => void confirm(reviewing)} />}
+    {pinAction && <PinConfirmationModal recipient={String((pinAction.preview?.recipient as {name?: string})?.name || '')} amount={Number(pinAction.preview?.amount || 0)} total={Number(pinAction.preview?.total || pinAction.preview?.amount || 0)} onConfirm={authorize} onCancel={() => {setPinAction(undefined); void cancel(pinAction);}} error={pinError} busy={busy} />}
+    {trustedPayment && <TrustedPaymentFlow contact={trustedPayment} close={() => setTrustedPayment(undefined)} />}
+  </div>;
+}
 
-        <div className="chat-footer">
-          {messages.length < 2 && (
-            <QuickActionChips onAction={handleQuickAction} />
-          )}
+function TrustedPaymentFlow({contact, close}: {contact: TrustedPayment; close: () => void}) {
+  const [amount, setAmount] = useState(''); const [reference, setReference] = useState(''); const [confirmedDetails, setConfirmedDetails] = useState(contact.verification_status === 'verified'); const [draft, setDraft] = useState<DirectDraft>(); const [pin, setPin] = useState(false); const [success, setSuccess] = useState(''); const [error, setError] = useState(''); const [busy, setBusy] = useState(false);
+  const prepare = async (event: FormEvent) => {event.preventDefault(); setError(''); setBusy(true); try {const created=await api<DirectDraft>('/transactions/draft',{method:'POST',body:JSON.stringify({recipient_id:contact.id,recipient_name:contact.name,recipient_phone:contact.phone,amount:Number(amount),reference:reference || null,recognition_confirmed:confirmedDetails})}); setDraft(created);} catch(reason) {setError(reason instanceof Error ? reason.message : 'Could not prepare this transfer.');} finally {setBusy(false);}};
+  const confirm = async () => {if (!draft) return; setError(''); setBusy(true); try {await api(`/transactions/draft/${draft.draft_id}/review`,{method:'POST'}); await api(`/transactions/draft/${draft.draft_id}/confirm`,{method:'POST'}); setPin(true);} catch(reason) {setError(reason instanceof Error ? reason.message : 'Could not confirm this transfer.');} finally {setBusy(false);}};
+  const authorize = async (value:string) => {if (!draft) return; setError(''); setBusy(true); try {const result=await api<{success:boolean;message:string}>(`/transactions/draft/${draft.draft_id}/execute`,{method:'POST',body:JSON.stringify({pin:value})}); if (!result.success) {setError(result.message); return;} setPin(false); setSuccess(result.message);} catch(reason) {setError(reason instanceof Error ? reason.message : 'PIN verification failed.');} finally {setBusy(false);}};
+  if (success) return <div className="confirmation-overlay"><section className="confirmation-card" role="dialog" aria-modal="true"><CheckCircle2 /><span className="eyebrow">TRANSFER COMPLETED</span><h2>Money sent to {contact.name}</h2><p>{success} Trusted People activity will now show this transfer.</p><button className="button" onClick={close}>Done</button></section></div>;
+  return <><div className="confirmation-overlay"><section className="confirmation-card trusted-payment-flow" role="dialog" aria-modal="true" aria-label="Send money"><button className="icon-button trusted-payment-flow__close" onClick={close} aria-label="Close"><ArrowDown /></button>{!draft ? <form onSubmit={(event) => void prepare(event)}><span className="eyebrow">SEND MONEY</span><h2>Recognize the recipient</h2><div className="trusted-payment-flow__recipient"><span>{contact.name.split(' ').map((word) => word[0]).join('').slice(0,2)}</span><div><strong>{contact.name}</strong><small>{contact.relationship} · {contact.phone}</small><em className={contact.verification_status === 'verified' ? 'verified' : ''}>{contact.verification_status === 'verified' ? 'Verified by you' : 'Needs verification'}</em></div></div>{contact.last_transfer_amount ? <p className="draft-evidence">Last transfer: {formatBDT(contact.last_transfer_amount)} · {contact.last_transfer_date}</p> : <p className="draft-evidence">First transfer to this saved contact. Verify the recipient details carefully.</p>}{contact.verification_status !== 'verified' && <label className="recognition-check"><input type="checkbox" checked={confirmedDetails} onChange={(event) => setConfirmedDetails(event.target.checked)} />I confirm this name and phone number are correct.</label>}<label className="field"><span>Amount</span><input required min="1" type="number" inputMode="decimal" value={amount} onChange={(event) => setAmount(event.target.value)} autoFocus /></label><label className="field"><span>Reference <small>Optional</small></span><input value={reference} maxLength={140} onChange={(event) => setReference(event.target.value)} /></label>{error && <p className="form-error">{error}</p>}<div className="confirmation-card__actions"><button className="button button--secondary" type="button" onClick={close}>Cancel</button><button className="button" disabled={busy || !confirmedDetails}>{busy ? 'Preparing…' : 'Review transfer'}</button></div></form> : <><span className="eyebrow">FINAL REVIEW</span><h2>Send to {draft.recipient.name}</h2><div className="trusted-payment-flow__recipient"><span>{contact.name.split(' ').map((word) => word[0]).join('').slice(0,2)}</span><div><strong>{contact.name}</strong><small>{contact.relationship} · {contact.phone}</small><em className={contact.verification_status === 'verified' ? 'verified' : ''}>{contact.verification_status === 'verified' ? 'Verified by you' : 'Confirmed before this transfer'}</em></div></div><div className="direct-draft-values"><span>Amount <b>{formatBDT(draft.amount)}</b></span><span>Fee <b>{formatBDT(draft.fee)}</b></span><strong>Total <b>{formatBDT(draft.total)}</b></strong></div>{error && <p className="form-error">{error}</p>}<p>This is a simulated transfer. You will enter your PIN yourself before it completes.</p><div className="confirmation-card__actions"><button className="button button--secondary" onClick={() => setDraft(undefined)}>Back</button><button className="button" disabled={busy} onClick={() => void confirm()}>{busy ? 'Confirming…' : 'Confirm transfer'}</button></div></>}</section></div>{pin && draft && <PinConfirmationModal recipient={draft.recipient.name} amount={draft.amount} total={draft.total} onConfirm={authorize} onCancel={() => setPin(false)} error={error} busy={busy} />}</>;
+}
 
-          <form className="chat-composer" onSubmit={handleSubmit}>
-            <label className="sr-only" htmlFor="coach-input">Ask about your money</label>
-            <input
-              id="coach-input"
-              className="chat-composer__input"
-              maxLength={500}
-              placeholder="Ask about your money…"
-              value={input}
-              onChange={(e) => setInput(e.target.value)}
-            />
-            <button className="chat-composer__send" type="submit" disabled={!input.trim() || busy} aria-label="Send question">
-              <Send size={18} />
-            </button>
-          </form>
-        </div>
-      </section>
+function getExplainMetric(state: unknown): ExplainMetricContext | undefined {
+  const metric = (state as {explainMetric?: unknown} | null)?.explainMetric;
+  if (!metric || typeof metric !== 'object') return undefined;
+  return isExplainMetricContext(metric as Partial<ExplainMetricContext>) ? metric as ExplainMetricContext : undefined;
+}
+function getLearningLesson(state: unknown): LearningLessonContext | undefined {
+  const lesson = (state as {learningLesson?: unknown} | null)?.learningLesson;
+  if (!lesson || typeof lesson !== 'object') return undefined;
+  const value = lesson as Partial<LearningLessonContext>;
+  return value.type === 'learning_lesson' && typeof value.lessonId === 'number' && typeof value.title === 'string' && typeof value.concept === 'string' ? value as LearningLessonContext : undefined;
+}
+function ExplainingContext({metric, busy, explainInBangla}: {metric: ExplainMetricContext; busy: boolean; explainInBangla: () => void}) { return <div className="explain-context" aria-label={`Explaining ${metric.title}`}><span>Explaining</span><strong>{metric.title} · {formatExplainMetricValue(metric)}</strong><button className="text-button" type="button" disabled={busy} onClick={explainInBangla}>বাংলায় বুঝিয়ে বলুন</button></div>; }
+function LearningContext({lesson}: {lesson: LearningLessonContext}) { return <div className="explain-context" aria-label={`Asking AI about ${lesson.title}`}><span>Learning context</span><strong>{lesson.title} · {lesson.concept}</strong><p>AI Assist can explain this concept in simpler words or বাংলা. Calculations and recommendations remain based on your financial data.</p></div>; }
 
-      {showPinModal && (
-        <PinConfirmationModal
-          onConfirm={handlePinSubmit}
-          onCancel={() => setShowPinModal(false)}
-          error={pinError}
-          recipient={draft?.recipient_name || 'your recipient'}
-          amount={draft?.amount || 0}
-          total={draft?.total || 0}
-          busy={executing}
-        />
-      )}
-    </div>
-  );
+function Welcome({ask}: {ask: (prompt: string) => void}) { const prompts=['Why did my spending increase?','How much can I safely spend?','How long will my money last?','Help me save for something','Analyze my food spending','Show my recent transactions','Create a budget','Run a spending scenario']; return <div className="assist-welcome"><span className="assist-welcome__orb"><Sparkles /></span><h1>How can I help?</h1><p>Ask about your money, savings, or simply tell me what you want to do.</p><small>English • বাংলা • mixed</small><div className="assistant-starters" aria-label="Starter prompts">{prompts.map((prompt) => <button type="button" key={prompt} onClick={() => ask(prompt)}>{prompt}</button>)}</div><div className="welcome-examples"><span>Examples:</span> “Send 500 taka to Fuad” <i>·</i> “Help me save for a laptop”</div></div>; }
+function Processing() { return <div className="assistant-block assistant-block--processing"><CoachAvatar /><div><span className="processing-label">{processLabel}</span><span className="typing" aria-label={processLabel}><i /><i /><i /></span></div></div>; }
+function MessageBlock({message, review, cancel, select}: {message: Message; review: () => void; cancel: () => void; select: (name: string) => void}) { return <div className={`assistant-block assistant-block--${message.role}`}>{message.role === 'ai' && <CoachAvatar />}<div>{message.role === 'user' ? <p>{message.text}</p> : message.response && <ResponseView response={message.response} review={review} cancel={cancel} select={select} />}</div></div>; }
+function ResponseView({response, review, cancel, select}: {response: Response; review: () => void; cancel: () => void; select: (name: string) => void}) {
+  if (response.type === 'action_preview' && response.preview) {
+    if (response.action?.name === 'send_money') return <div className="action-card-wrap"><p className="assistant-copy">{response.message}</p><ActionSteps /><TransactionDraftCard draft={{recipient_name: String((response.preview.recipient as {name?: string})?.name || ''), relationship: String(response.preview.relationship || 'Known'), amount: Number(response.preview.amount), fee: Number(response.preview.fee), total: Number(response.preview.total), balance_after: Number(response.preview.balance_after), safe_to_spend_before: Number((response.preview.safe_to_spend_before as {safe_to_spend?: number})?.safe_to_spend), safe_to_spend_after: Number(response.preview.safe_to_spend_after)}} onReview={review} onCancel={cancel} /></div>;
+    return <StructuredCard response={response} review={review} cancel={cancel} label="Review update" />;
+  }
+  if (response.type === 'savings_plan') return <StructuredCard response={response} review={review} cancel={cancel} label="Create goal" goal />;
+  if (response.type === 'selection') return <section className="selection-card"><strong>{response.message}</strong><div>{response.options?.map((option) => <button key={option.id} onClick={() => select(option.name)}><span>{option.name.slice(0, 2).toUpperCase()}</span><b>{option.name}<small>{option.relationship}</small></b><ArrowRight /></button>)}</div></section>;
+  if (response.type === 'transaction_list') return <section className="insight-card"><h3>{response.message}</h3>{response.transactions?.map((item) => <div className="transaction-mini" key={item.id}><span>{item.merchant_name}<small>{item.category}</small></span><b className={item.direction === 'income' ? 'money-positive' : 'money-negative'}>{item.direction === 'income' ? '+' : '-'}{formatBDT(item.amount)}</b></div>)}</section>;
+  if (response.type === 'financial_insight') return <section className="insight-card"><span className="eyebrow">CALCULATED INSIGHT</span><ReactMarkdown remarkPlugins={[remarkGfm]}>{response.message}</ReactMarkdown>{response.data && <EvidenceSummary data={response.data} />}</section>;
+  if (response.type === 'success') return <section className="receipt-card"><CheckCircle2 /><div><span>COMPLETED</span><h3>{response.message}</h3>{response.result?.balance_after !== undefined && <strong>Balance {formatBDT(Number(response.result.balance_after))}</strong>}</div></section>;
+  return <section className={response.type === 'error' ? 'assistant-error' : 'clarification-card'}><p>{response.message}</p></section>;
+}
+function evidenceValueType(key: string): ValueType {
+  if (/(amount|balance|spend|income|budget|limit|saving|purchase|expense|shortfall)/i.test(key)) return 'currency';
+  if (/(?:^|_)days?(?:_|$)|runway/i.test(key)) return 'days';
+  if (/(?:percent|percentage|rate|utilization)/i.test(key)) return 'percentage';
+  if (/(?:^|_)score(?:_|$)/i.test(key)) return 'score';
+  if (/(?:date|until)$/i.test(key)) return 'date';
+  return 'number';
+}
+function EvidenceSummary({data}: {data: Record<string, unknown>}) { const rows=Object.entries(data).filter(([, value]) => typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean').slice(0, 6); if (!rows.length) return null; return <details className="evidence-summary"><summary>Calculation details</summary><dl>{rows.map(([key,value]) => { const type = evidenceValueType(key); return <div key={key}><dt>{key.replace(/_/g,' ')}</dt><dd>{typeof value === 'number' || (typeof value === 'string' && type === 'date') ? formatValue(value, type) : String(value)}</dd></div>; })}</dl></details>; }
+function ActionSteps() { return <div className="action-steps"><span>✓ Understood</span><span>✓ Calculated impact</span><span>○ Waiting for review</span></div>; }
+type DisplayField = {key: string; label: string; value: string | number | boolean; value_type: ValueType};
+
+function isDisplayField(value: unknown): value is DisplayField {
+  if (!value || typeof value !== 'object') return false;
+  const field = value as Partial<DisplayField>;
+  return typeof field.key === 'string' && typeof field.label === 'string' && typeof field.value_type === 'string' && ['currency', 'months', 'days', 'percentage', 'date', 'number', 'score', 'text'].includes(field.value_type);
+}
+
+function feasibilityCopy(status: unknown): string {
+  if (status === 'on_track') return 'This goal looks achievable within your selected timeline.';
+  if (status === 'stretch') return 'This goal may require tighter spending.';
+  if (status === 'timeline_too_short') return 'Your selected timeline may be too aggressive.';
+  return 'Add your financial information to estimate affordability.';
+}
+
+function StructuredCard({response, review, cancel, label, goal = false}: {response: Response; review: () => void; cancel: () => void; label: string; goal?: boolean}) {
+  const preview = response.preview || {};
+  const fields = Array.isArray(preview.display_fields) ? preview.display_fields.filter(isDisplayField) : [];
+  const goalName = String(preview.goal_name || 'Savings');
+  const required = Number(preview.required_monthly_contribution || 0);
+  const affordable = Number(preview.affordable_monthly_contribution || 0);
+  const capacityUsed = affordable > 0 ? Math.min(100, Math.round(required / affordable * 100)) : 100;
+  const genericFields: DisplayField[] = Object.entries(preview)
+    .filter(([key, value]) => key !== 'display_fields' && (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean'))
+    .slice(0, 5)
+    .map(([key, value]) => ({key, label: key.replace(/_/g, ' '), value: value as string | number | boolean, value_type: key.includes('amount') || key.includes('limit') ? 'currency' : 'text'}));
+  const visibleFields = goal ? fields : genericFields;
+  return <section className={`structured-action-card ${goal ? 'structured-action-card--goal' : ''}`}>
+    <div className="structured-action-card__head"><span>{goal ? 'SAVINGS PLAN' : 'ACTION PREVIEW'}</span><b>{goal ? `${goalName} goal` : 'Budget update'}</b></div>
+    <p>{response.message}</p>
+    <div className="structured-metrics">{visibleFields.map((field) => <span key={field.key}><small>{field.label}</small><strong>{formatValue(field.value, field.value_type)}{field.key.endsWith('_contribution') ? '/month' : ''}</strong></span>)}</div>
+    {goal && <div className="goal-progress" aria-label="Goal feasibility">
+      <i style={{width: `${capacityUsed}%`}} />
+      <small>{affordable > 0 ? `Monthly capacity used: ${capacityUsed}% · ${feasibilityCopy(preview.feasibility_status)}` : feasibilityCopy(preview.feasibility_status)}</small>
+    </div>}
+    <div className="structured-action-card__actions"><button className="button button--secondary" onClick={cancel}>Cancel</button><button className="button" onClick={review}>{label} <ArrowRight /></button></div>
+  </section>;
+}
+function ConfirmationCard({response, back, confirm}: {response: Response; back: () => void; confirm: () => void}) { const p=response.preview || {}; const recipient=(p.recipient as {name?: string})?.name; return <div className="confirmation-overlay"><section className="confirmation-card" role="dialog" aria-modal="true" aria-labelledby="confirm-action-title"><LockKeyhole /><span className="eyebrow">FINAL REVIEW</span><h2 id="confirm-action-title">Confirm {response.action?.name === 'send_money' ? 'transfer' : 'action'}</h2><p>You are about to {response.action?.name === 'send_money' ? `send ${formatBDT(Number(p.amount))} to ${recipient}. Total deduction: ${formatBDT(Number(p.total))}.` : response.message}</p><div className="confirmation-card__actions"><button className="button button--secondary" onClick={back}>Back</button><button className="button" onClick={confirm}>Confirm {response.action?.name === 'send_money' ? 'transfer' : 'action'}</button></div></section></div>; }
+function Composer({input, busy, setInput, submit}: {input: string; busy: boolean; setInput: (value: string) => void; submit: () => void}) {
+  const textarea = useRef<HTMLTextAreaElement>(null);
+  useEffect(() => { const node = textarea.current; if (!node) return; node.style.height = 'auto'; node.style.height = `${Math.min(node.scrollHeight, 156)}px`; }, [input]);
+  return <form className="assist-composer" onSubmit={(event: FormEvent) => {event.preventDefault(); submit();}}><label className="sr-only" htmlFor="coach-input">Tell AI Assist what you want to do</label><textarea ref={textarea} id="coach-input" rows={1} maxLength={500} value={input} onChange={(event) => setInput(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); submit(); } }} placeholder="Ask anything about your money…" /><div><small>English • বাংলা • mixed</small><button type="submit" disabled={!input.trim() || busy} aria-label={busy ? 'Preparing your request' : 'Send message'}>{busy ? <span className="composer-spinner" /> : <ArrowUp size={19} />}</button></div></form>;
 }

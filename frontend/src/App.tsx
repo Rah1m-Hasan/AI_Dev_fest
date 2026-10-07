@@ -31,19 +31,20 @@ import {
   Eye,
   EyeOff,
   ArrowUpRight,
-  Bus,
-  Car,
+  ArrowRight,
   CircleDollarSign,
+  Compass,
   HeartHandshake,
-  School,
-  Shield,
-  Ticket,
+  Activity,
+  CalendarDays,
+  TrendingDown,
 } from 'lucide-react';
 import {Link, Navigate, NavLink, Route, Routes, useLocation, useNavigate} from 'react-router-dom';
 import {api, token} from './api/client';
 import {Brand, Tag, TrustBadge} from './components/ui';
+import {ExplainMetricButton} from './components/ExplainMetricButton';
 import type {DashboardSummary, DemoUser} from './types';
-import {formatBDT} from './format';
+import {formatBDT, titleCase} from './format';
 import {
   GoalsPage,
   HistoryPage,
@@ -76,13 +77,19 @@ function Login({onLogin}: {onLogin: (email: string) => Promise<void>}) {
   };
   return <main className="login-screen">
     <section className="login-panel">
-      <Brand />
-      <Tag tone="demo">Concept integration prototype</Tag>
-      <h1>Understand your money.<br />Choose what happens next.</h1>
-      <p>See why your balance changed, what may happen next, and what you can realistically do—using synthetic demo activity.</p>
-      <div className="trust-callout"><ShieldCheck /><span><strong>You stay in control.</strong> AI Assist explains and suggests. It never moves money without your confirmation.</span></div>
+      <div className="login-panel__brand">
+        <span className="brand__mark">u</span>
+        <strong>upay</strong>
+        <span className="login-panel__divider" aria-hidden="true" />
+        <span>AI Assist</span>
+      </div>
+      <Tag tone="demo">Hackathon concept prototype · Synthetic data only</Tag>
+      <h1>Your money, explained simply.</h1>
+      <p>See why your balance changed, what may happen next, and what you can realistically do. No real money moves. No account linked.</p>
+      <div className="trust-callout"><ShieldCheck /><span><strong>You stay in control.</strong> AI only explains and suggests — never moves money without your explicit confirmation and PIN.</span></div>
+      <p className="login-panel__choose">Choose a demo profile to begin</p>
       <div className="profile-list" aria-label="Choose a demo profile">{profiles.map((profile) => <button className="profile-choice" disabled={Boolean(busy)} onClick={() => void choose(profile.email)} key={profile.email}>
-        <span className="avatar">{profile.name[0]}</span><span><strong>{profile.name}</strong><small>{profile.persona} · {profile.story}</small></span><span>{busy === profile.email ? 'Loading…' : 'Try demo'} </span>
+        <span className="avatar">{profile.name[0]}</span><span><strong>{profile.name}</strong><small>{profile.persona} · {profile.story}</small></span><span className="profile-choice__arrow">{busy === profile.email ? 'Loading…' : <ArrowRight />}</span>
       </button>)}</div>
       {error && <p className="form-error" role="alert">{error}</p>}
     </section>
@@ -98,28 +105,155 @@ function Login({onLogin}: {onLogin: (email: string) => Promise<void>}) {
   </main>;
 }
 
+type ServiceTone = 'gold' | 'blue' | 'green' | 'indigo' | 'amber' | 'teal' | 'cyan' | 'navy' | 'neutral';
+type Service = {
+  name: string;
+  description: string;
+  icon: typeof Send;
+  to: string;
+  tone: ServiceTone;
+  featured?: boolean;
+  badge?: string;
+};
+
+function SectionHeader({title, action}: {title: string; action?: React.ReactNode}) {
+  return <div className="section-title"><h2>{title}</h2>{action && <div className="section-title__action">{action}</div>}</div>;
+}
+
+function HomeMetric({label, value, tone = 'default', metric}: {label: string; value?: string; tone?: 'default'|'positive'|'negative'; metric?: import('./types').ExplainMetricContext}) {
+  return <div className={`home-metric home-metric--${tone}`}>
+    <span>{label}</span>
+    {value ? <strong>{value}</strong> : <i className="dashboard-skeleton dashboard-skeleton--metric" aria-label={`Loading ${label}`} />}
+    <div className="home-metric__action">{metric && <ExplainMetricButton metric={metric} variant="compact" />}</div>
+  </div>;
+}
+
+function ServiceGrid({services}: {services: Service[]}) {
+  return <div className="service-grid" aria-label="upay services">
+    {services.map(({name, description, icon: Icon, to, tone, featured, badge}) => <Link className={`service-item service-item--${tone}${featured ? ' service-item--assist' : ''}`} to={to} key={name}>
+      <span className="service-item__icon"><Icon aria-hidden="true" /></span>
+      <span className="service-item__copy"><strong>{name}</strong><small>{description}</small></span>
+      {badge && <span className="service-item__badge">{badge}</span>}
+    </Link>)}
+  </div>;
+}
+
+function QuickActionsSection({services}: {services: Service[]}) {
+  return <section className="home-section home-actions" aria-labelledby="quick-actions-title">
+    <div className="quick-actions__header">
+      <div>
+        <h2 id="quick-actions-title">Quick Actions</h2>
+        <p>Your most-used money actions</p>
+      </div>
+      <Link className="quick-actions__view-all" to="/coach/plan">View all <ArrowRight aria-hidden="true" /></Link>
+    </div>
+    <ServiceGrid services={services} />
+  </section>;
+}
+
+function FeatureCard({to, icon: Icon, title, description}: {to: string; icon: typeof UsersRound; title: string; description: string}) {
+  return <Link className="feature-card" to={to}>
+    <span className="feature-card__icon"><Icon aria-hidden="true" /></span>
+    <span className="feature-card__copy"><strong>{title}</strong><small>{description}</small></span>
+    <ArrowRight aria-hidden="true" />
+  </Link>;
+}
+
+function HomeOverview({summary, balance, hidden, onToggle, error}: {summary?: DashboardSummary; balance: number; hidden: boolean; onToggle: () => void; error?: boolean}) {
+  const mask = (amount: number) => hidden ? '৳ ••••••' : formatBDT(amount);
+  return <section className="home-overview" aria-label="Financial overview">
+    <div className="home-overview__main">
+      <div>
+        <span className="overview-label">Available balance</span>
+        <strong>{mask(balance)}</strong>
+        <small>Your upay wallet balance</small>
+      </div>
+      <button className="overview-visibility" onClick={onToggle} aria-label={hidden ? 'Show balance' : 'Hide balance'}>{hidden ? <Eye /> : <EyeOff />}</button>
+    </div>
+    <div className="home-overview__metrics">
+      <HomeMetric label="Income this month" value={summary ? mask(summary.this_month.income) : error ? 'Unavailable' : undefined} tone="positive" />
+      <HomeMetric label="Spent this month" value={summary ? mask(summary.this_month.spending) : error ? 'Unavailable' : undefined} tone="negative" metric={summary ? {metricId: 'monthly_spending', title: 'Monthly Spending', value: summary.this_month.spending, unit: 'BDT', source: 'home_overview', context: {period: summary.period_label}} : undefined} />
+      <HomeMetric label="Safe to spend" value={summary ? mask(summary.safe_to_spend.safe_to_spend) : error ? 'Unavailable' : undefined} tone="positive" metric={summary ? {metricId: 'safe_to_spend', title: 'Safe to Spend', value: summary.safe_to_spend.safe_to_spend, unit: 'BDT', source: 'home_overview', context: {currentBalance: summary.safe_to_spend.current_balance, upcomingCommittedExpenses: summary.safe_to_spend.upcoming_committed_expenses, recommendedReserve: summary.safe_to_spend.recommended_reserve}} : undefined} />
+    </div>
+  </section>;
+}
+
+function FinancialSignals({summary}: {summary: DashboardSummary}) {
+  const pulse = summary.pulse.why[0];
+  return <section className="home-section">
+    <SectionHeader title="Smart financial signals" action={<Link to="/coach/insights">View insights <ArrowRight /></Link>} />
+    <div className="signal-grid">
+      <article className="signal-card signal-card--safe">
+        <span className="signal-card__icon"><ShieldCheck /></span><span className="signal-card__label">Safe to spend</span>
+        <strong>{formatBDT(summary.safe_to_spend.safe_to_spend)}</strong><small>After commitments</small><div className="signal-card__actions"><ExplainMetricButton metric={{metricId: 'safe_to_spend', title: 'Safe to Spend', value: summary.safe_to_spend.safe_to_spend, unit: 'BDT', source: 'home_signal', context: {currentBalance: summary.safe_to_spend.current_balance, upcomingCommittedExpenses: summary.safe_to_spend.upcoming_committed_expenses, recommendedReserve: summary.safe_to_spend.recommended_reserve}}} /></div>
+      </article>
+      <article className="signal-card">
+        <span className="signal-card__icon"><CalendarDays /></span><span className="signal-card__label">Money runway</span>
+        <strong>~{summary.runway.days} <em>days</em></strong><small>At your current pace</small><div className="signal-card__actions"><ExplainMetricButton metric={{metricId: 'money_runway', title: 'Money Runway', value: summary.runway.days, unit: 'days', source: 'home_signal', context: {todayBalance: summary.runway.today_balance, expected14DayExpenses: summary.runway.expected_14_day_expenses, expected14DayIncome: summary.runway.expected_14_day_income, confidence: summary.runway.confidence}}} /><Link className="signal-card__link" to="/coach">See forecast <ArrowRight /></Link></div>
+      </article>
+      <Link to="/coach/insights" className="signal-card signal-card--pulse">
+        <span className="signal-card__icon"><Activity /></span><span className="signal-card__label">Money pulse</span>
+        <strong>{pulse?.label || summary.pulse.status}</strong><small>{pulse?.detail || summary.pulse.headline || 'No new money insights right now.'}</small><span className="signal-card__link">See why <ArrowRight /></span>
+      </Link>
+    </div>
+  </section>;
+}
+
+function RecentTransactions({summary, error, retry}: {summary?: DashboardSummary; error?: boolean; retry: () => void}) {
+  return <section className="home-section">
+    <SectionHeader title="Recent transactions" action={<Link to="/coach/transactions">See all <ArrowRight /></Link>} />
+    <div className="home-activity">
+      {!summary && !error && <div className="transaction-skeletons" aria-label="Loading recent transactions"><i /><i /><i /><i /></div>}
+      {error && <div className="home-empty-state"><TrendingDown /><span><strong>Couldn’t load recent activity.</strong><small>Your wallet balance is still available. Try again to refresh transactions.</small></span><button className="text-button" onClick={retry}>Try again</button></div>}
+      {summary?.recent_transactions.length === 0 && <div className="home-empty-state"><History /><span><strong>No recent transactions yet.</strong><small>New wallet activity will appear here.</small></span></div>}
+      {summary?.recent_transactions.slice(0, 5).map((transaction) => {
+        const incoming = transaction.direction === 'income';
+        return <Link to="/coach/transactions" key={transaction.id} className="home-transaction">
+          <span className={`merchant-icon merchant-icon--${incoming ? 'in' : 'out'}`}>{transaction.merchant_name[0]}</span>
+          <span><strong>{transaction.merchant_name}</strong><small>{titleCase(transaction.transaction_type)} · {new Date(transaction.timestamp).toDateString() === new Date().toDateString() ? 'Today' : transaction.category}</small></span>
+          <strong className={incoming ? 'money-positive' : 'money-negative'}><b aria-hidden="true">{incoming ? '+' : '−'}</b>{formatBDT(transaction.amount)}</strong>
+        </Link>;
+      })}
+    </div>
+  </section>;
+}
+
 function UpayHome({user}: {user: DemoUser}) {
   const [summary, setSummary] = useState<DashboardSummary>();
+  const [loadError, setLoadError] = useState(false);
   const [hidden, setHidden] = useState(false);
-  useEffect(() => { void api<DashboardSummary>('/dashboard/summary').then(setSummary).catch(() => undefined); }, []);
-  const services = [
-    ['Send Money', Send, '/coach/assistant'], ['Mobile Recharge', Smartphone, '/coach/assistant'], ['Cash Out', Landmark, '/coach/assistant'], ['Pay Bill', ReceiptText, '/coach/assistant'],
-    ['Add Money', WalletCards, '/coach/assistant'], ['Savings', PiggyBank, '/coach/goals'], ['Fund Transfer', ArrowUpRight, '/coach/assistant'], ['Request Money', CircleDollarSign, '/coach/assistant'],
-    ['Make Payment', ShieldCheck, '/coach/assistant'], ['AI Assist', Sparkles, '/coach/assistant'], ['NPSB', Landmark, '/coach/assistant'], ['More', MoreHorizontal, '/coach/plan'],
-  ] as const;
+  const loadSummary = () => { setLoadError(false); void api<DashboardSummary>('/dashboard/summary').then(setSummary).catch(() => setLoadError(true)); };
+  useEffect(loadSummary, []);
+  const services: Service[] = [
+    {name: 'Send Money', description: 'Transfer instantly', icon: Send, to: '/coach/assistant', tone: 'gold'},
+    {name: 'Mobile Recharge', description: 'Top up a number', icon: Smartphone, to: '/coach/assistant', tone: 'blue'},
+    {name: 'Pay Bill', description: 'Pay on time', icon: ReceiptText, to: '/coach/assistant', tone: 'indigo'},
+    {name: 'Cash Out', description: 'Find an agent', icon: Landmark, to: '/coach/assistant', tone: 'green'},
+    {name: 'Add Money', description: 'Bring money in', icon: WalletCards, to: '/coach/assistant', tone: 'amber'},
+    {name: 'Fund Transfer', description: 'To another bank', icon: ArrowUpRight, to: '/coach/assistant', tone: 'blue'},
+    {name: 'Savings', description: 'Plan and grow', icon: PiggyBank, to: '/coach/goals', tone: 'teal'},
+    {name: 'Request Money', description: 'Ask to be paid', icon: CircleDollarSign, to: '/coach/assistant', tone: 'cyan'},
+    {name: 'AI Assist', description: 'Tell me what you need', icon: Sparkles, to: '/coach/assistant', tone: 'navy', featured: true, badge: 'Smart'},
+    {name: 'Make Payment', description: 'Pay securely', icon: ShieldCheck, to: '/coach/assistant', tone: 'indigo'},
+    {name: 'NPSB', description: 'Bank network', icon: Landmark, to: '/coach/assistant', tone: 'blue'},
+    {name: 'More', description: 'See all services', icon: MoreHorizontal, to: '/coach/plan', tone: 'neutral'},
+  ];
   const balance = summary?.balance ?? user.balance;
   return <div className="home-dashboard page">
-    <section className="upay-account-strip">
-      <span className="upay-avatar" aria-hidden="true"><span>u</span></span>
-      <div className="upay-account-strip__identity"><strong>{user.display_name}</strong><small>01•••••••••</small></div>
-      <button className="upay-balance-button" onClick={() => setHidden(!hidden)} aria-label={hidden ? 'Show balance' : 'Hide balance'}>Balance</button>
-      <button className="upay-notification" aria-label="Notifications preview"><Bell /></button>
-      <div className="upay-balance-popover"><small>Available balance</small><strong>{hidden ? '৳ ••••••' : formatBDT(balance)}</strong><button onClick={() => setHidden(!hidden)} aria-label={hidden ? 'Show balance' : 'Hide balance'}>{hidden ? <Eye /> : <EyeOff />}</button></div>
+    <HomeOverview summary={summary} balance={balance} hidden={hidden} error={loadError} onToggle={() => setHidden(!hidden)} />
+    {summary ? <FinancialSignals summary={summary} /> : loadError ? <section className="home-section"><SectionHeader title="Smart financial signals" /><div className="home-signals-error"><Activity /><span><strong>Money signals couldn’t be refreshed.</strong><small>Try again to load your personalized financial picture.</small></span><button className="text-button" onClick={loadSummary}>Try again</button></div></section> : <section className="home-section"><SectionHeader title="Smart financial signals" /><div className="signal-grid signal-grid--loading"><i /><i /><i /></div></section>}
+    <QuickActionsSection services={services} />
+    <RecentTransactions summary={summary} error={loadError} retry={loadSummary} />
+    <section className="home-section home-secondary">
+      <SectionHeader title="Planning & support" />
+      <div className="home-shortcuts">
+        <FeatureCard to="/people" icon={UsersRound} title="Trusted People" description="Recognize people you pay" />
+        <FeatureCard to="/coach/assistant?guided=1" icon={Accessibility} title="Guided Mode" description="One calm step at a time" />
+        <FeatureCard to="/coach/scenario" icon={Compass} title="Scenario Lab" description="See how a decision may affect your future" />
+        <FeatureCard to="/coach/goals" icon={PiggyBank} title="Savings Goals" description="Build toward a target" />
+      </div>
     </section>
-    <section className="home-section home-actions"><div className="section-title"><h2>upay Services</h2><Link to="/coach/assistant">Ask AI Assist</Link></div><div className="service-grid" aria-label="upay services">{services.map(([name, Icon, to]) => <Link className={`service-item ${name === 'AI Assist' ? 'service-item--assist' : ''}`} to={to} key={name}><span><Icon /></span><small>{name}</small></Link>)}</div></section>
-    {summary && <section className="money-today home-section"><div className="section-title"><h2>Your Money Today</h2><Link to="/coach">View full insights <ArrowUpRight /></Link></div><div className="home-intelligence"><Link to="/coach/assistant" className="safe-spend-glance"><small>SAFE TO SPEND</small><strong>{formatBDT(summary.safe_to_spend.safe_to_spend)}</strong><span>After known commitments <ArrowUpRight /></span></Link><Link to="/coach" className="runway-glance"><small>MONEY RUNWAY</small><strong>~{summary.runway.days} days</strong><span>Based on recent spending <ArrowUpRight /></span></Link><Link to="/coach/insights" className="pulse-glance"><span className="pulse-glance__icon"><Sparkles /></span><span><small>MONEY PULSE</small><strong>{summary.pulse.why[0]?.label || summary.pulse.status}</strong><em>{summary.pulse.why[0]?.detail || summary.pulse.headline}</em></span><ArrowUpRight /></Link></div></section>}
-    <section className="home-section"><div className="section-title"><h2>Recent transactions</h2><Link to="/coach/transactions">See all</Link></div><div className="home-activity">{summary?.recent_transactions.slice(0, 3).map((transaction) => <Link to="/coach/transactions" key={transaction.id}><span className="merchant-icon">{transaction.merchant_name[0]}</span><span><strong>{transaction.merchant_name}</strong><small>{transaction.category} · Today</small></span><strong className={transaction.direction === 'income' ? 'money-positive' : 'money-negative'}>{transaction.direction === 'income' ? '+' : '-'}{formatBDT(transaction.amount)}</strong></Link>) || <div className="home-placeholder"><History /><span><strong>Your recent activity will appear here</strong><small>Loading your demo wallet activity.</small></span></div>}</div></section>
-    <section className="home-section home-secondary"><div className="section-title"><h2>Support & planning</h2></div><div className="home-shortcuts"><Link to="/people"><UsersRound /><span><strong>People, not numbers</strong><small>Recognize who you are paying</small></span></Link><Link to="/coach/assistant?guided=1"><Accessibility /><span><strong>Guided Mode</strong><small>One calm step at a time</small></span></Link></div></section>
+
     <p className="concept-note">Concept integration prototype · Synthetic demo data · Not an official production upay service</p>
   </div>;
 }
@@ -159,8 +293,9 @@ function AppShell({user, switchUser}: {user: DemoUser; switchUser: (email: strin
       section: 'MAIN',
       items: [
         {to: '/', label: 'Home', icon: Home, end: true},
-        {to: '/coach/plan', label: 'Quick Actions', icon: Target},
+        {to: '/coach/plan', label: 'Plan', icon: Target},
         {to: '/coach/assistant', label: 'AI Assist', icon: MessageCircle},
+        {to: '/coach/scenario', label: 'Scenario Lab', icon: Compass},
         {to: '/coach', label: 'Overview', icon: Zap, end: true},
       ],
     },
@@ -227,8 +362,9 @@ function AppShell({user, switchUser}: {user: DemoUser; switchUser: (email: strin
     if (path === '/coach/insights') return 'Financial Insights';
     if (path === '/coach/transactions' || path === '/history') return 'Transactions';
     if (path === '/coach/plan') return 'Plan';
+    if (path === '/coach/scenario') return 'Scenario Lab';
     if (path === '/coach/goals') return 'Goals';
-    if (path === '/coach/reports') return 'Reports';
+    if (path === '/coach/reports') return 'Financial Health';
     if (path === '/coach/learn') return 'Learn';
     if (path === '/offers') return 'Offers';
     if (path === '/people') return 'Trusted People';
@@ -287,18 +423,18 @@ function AppShell({user, switchUser}: {user: DemoUser; switchUser: (email: strin
       {sidebarTooltip && <span className="sidebar__tooltip sidebar__tooltip--portal" role="tooltip" style={{top: sidebarTooltip.top}}>{sidebarTooltip.label}</span>}
     </aside>
     {mobileDrawerOpen && <button className="sidebar-backdrop" aria-label="Close navigation" onClick={() => setMobileDrawerOpen(false)} />}
-    <div className="app-main">
+    <div className={`app-main ${location.pathname === '/coach/assistant' ? 'app-main--assistant' : ''}`}>
       <header className="topbar">
-        <div className="topbar__title"><button className="topbar__menu-button icon-button" onClick={() => setMobileDrawerOpen(true)} aria-label="Open navigation"><Menu /></button><div><span>UPAY · AI ASSIST</span><strong>{getPageTitle()}</strong></div></div>
+        <div className="topbar__title"><button className="topbar__menu-button icon-button" onClick={() => setMobileDrawerOpen(true)} aria-label="Open navigation"><Menu /></button><div>{location.pathname === '/coach/assistant' ? <><strong>AI Assist</strong><span>Ask naturally in English, বাংলা, or both</span></> : location.pathname === '/' ? <><strong>{getPageTitle()}</strong><span>Your wallet at a glance</span></> : <><span>upay AI Assist</span><strong>{getPageTitle()}</strong></>}</div></div>
         <div className="topbar__actions">
-          <span className="icon-button" aria-label="Notifications preview"><Bell /></span>
+          <button className="topbar__notification icon-button" aria-label="Notifications"><Bell /></button>
           <div className="profile-menu">
-            <button className="profile-button" aria-expanded={profileOpen} onClick={() => setProfileOpen(!profileOpen)}><span className="avatar">{user.display_name[0]}</span><span><strong>{user.display_name}</strong><small>{user.persona}</small></span><ChevronDown /></button>
+            <button className="profile-button" aria-expanded={profileOpen} aria-haspopup="menu" aria-label={`Account menu for ${user.display_name}, ${user.persona}`} onClick={() => setProfileOpen(!profileOpen)}><span className="avatar">{user.display_name[0]}</span><span><strong>{user.display_name}</strong><small>{user.persona}</small></span><ChevronDown aria-hidden="true" /></button>
             {profileOpen && <div className="profile-popover"><span>Switch demo profile</span>{profiles.map((profile) => <button disabled={Boolean(switching)} onClick={() => void changeProfile(profile.email)} key={profile.email}><span className="avatar">{profile.name[0]}</span><span><strong>{profile.name}</strong><small>{profile.persona} · {profile.story}</small></span>{switching === profile.email && <small>Switching…</small>}</button>)}</div>}
           </div>
         </div>
       </header>
-      <main className="main-content">
+      <main className={`main-content ${location.pathname === '/coach/assistant' ? 'main-content--assistant' : ''}`}>
         <Routes key={user.id}>
           <Route path="/" element={<UpayHome user={user} />} />
           <Route path="/coach" element={<PulsePage user={user} />} />

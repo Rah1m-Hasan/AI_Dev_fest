@@ -47,6 +47,9 @@ Frontend (React/Vite) → Backend (FastAPI) → SQLite/PostgreSQL
 | `frontend/src/App.tsx` | Main React app |
 | `docs/` | Architecture, privacy, AI design docs |
 
+For a compact route and module map, start with `docs/CODEBASE_MAP.md` rather
+than scanning the repository.
+
 ## Groq Configuration
 
 - Model: `qwen/qwen3.8-27b` (free tier compatible)
@@ -57,3 +60,13 @@ Frontend (React/Vite) → Backend (FastAPI) → SQLite/PostgreSQL
 
 - Backend: `http://localhost:8000/api/v1`
 - Frontend proxies `/api` to backend in development
+
+## Maintenance Rules
+
+- Keep API paths, request/response shapes, deterministic calculations, and
+  confirmation/PIN flows backward compatible.
+- Keep Groq server-side and preserve deterministic fallback behavior.
+- Do not commit generated local output: `frontend/node_modules`,
+  `frontend/dist`, Python bytecode, test caches, logs, or `.env` files.
+- Validate changes with `cd frontend && npm test && npm run build` and
+  `cd backend && python -m pytest`.

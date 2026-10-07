@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { X, Lock, AlertCircle, ShieldCheck } from 'lucide-react';
 import {formatBDT} from '../../format';
 
@@ -15,6 +15,16 @@ interface PinConfirmationModalProps {
 export function PinConfirmationModal({ onConfirm, onCancel, error, recipient, amount, total, busy = false }: PinConfirmationModalProps) {
   const [pin, setPin] = useState('');
   const [showError, setShowError] = useState(false);
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    inputRef.current?.focus();
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === 'Escape' && !busy) onCancel();
+    };
+    window.addEventListener('keydown', closeOnEscape);
+    return () => window.removeEventListener('keydown', closeOnEscape);
+  }, [busy, onCancel]);
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -32,8 +42,8 @@ export function PinConfirmationModal({ onConfirm, onCancel, error, recipient, am
   };
 
   return (
-    <div className="pin-modal-backdrop">
-      <div className="pin-modal">
+    <div className="pin-modal-backdrop" role="presentation" onMouseDown={onCancel}>
+      <div className="pin-modal" role="dialog" aria-modal="true" aria-labelledby="pin-modal-title" onMouseDown={(event) => event.stopPropagation()}>
         <button className="pin-modal__close" onClick={onCancel} aria-label="Cancel">
           <X size={20} />
         </button>
@@ -42,7 +52,7 @@ export function PinConfirmationModal({ onConfirm, onCancel, error, recipient, am
           <div className="pin-modal__icon">
             <Lock size={24} />
           </div>
-          <h2>Confirm your transfer</h2>
+          <h2 id="pin-modal-title">Confirm your transfer</h2>
           <p>Review the details, then enter your PIN.</p>
         </div>
 
@@ -56,6 +66,8 @@ export function PinConfirmationModal({ onConfirm, onCancel, error, recipient, am
         <form onSubmit={handleSubmit} className="pin-modal__form">
           <div className="pin-input-group">
             <input
+              ref={inputRef}
+              aria-label="Four digit demo PIN"
               type="password"
               inputMode="numeric"
               pattern="[0-9]*"
@@ -64,7 +76,6 @@ export function PinConfirmationModal({ onConfirm, onCancel, error, recipient, am
               onChange={(e) => handlePinChange(e.target.value)}
               placeholder="••••"
               className={`pin-input ${showError || error ? 'pin-input--error' : ''}`}
-              autoFocus
             />
           </div>
 

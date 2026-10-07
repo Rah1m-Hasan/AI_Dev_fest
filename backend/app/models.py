@@ -1,5 +1,5 @@
 from datetime import datetime, date
-from sqlalchemy import String, Integer, Numeric, Boolean, DateTime, Date, ForeignKey, Text, JSON, Index
+from sqlalchemy import String, Integer, Numeric, Boolean, DateTime, Date, ForeignKey, Text, JSON, Index, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from app.db import Base
 
@@ -29,6 +29,11 @@ class Account(Base):
 class Profile(Base):
     __tablename__ = "profiles"
     id: Mapped[int] = mapped_column(primary_key=True); user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), unique=True); locale: Mapped[str] = mapped_column(String(8), default="en")
+class UserPhone(Base):
+    __tablename__ = "user_phones"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), unique=True, index=True)
+    phone: Mapped[str] = mapped_column(String(20), unique=True, index=True)
 class Merchant(Base):
     __tablename__ = "merchants"
     id: Mapped[int] = mapped_column(primary_key=True); name: Mapped[str] = mapped_column(String(120), index=True); category: Mapped[str] = mapped_column(String(40))
@@ -66,6 +71,26 @@ class Budget(Base):
     categories: Mapped[dict] = mapped_column(JSON, default=dict)
     user: Mapped[User] = relationship(back_populates="budgets")
 
+class PlanState(Base):
+    """The user's saved monthly-plan choices, separate from the active budget.
+
+    A budget remains the source used by existing dashboard and alert flows.  This
+    record lets a person save a customised plan as a draft before explicitly
+    activating it.
+    """
+    __tablename__ = "plan_states"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), unique=True, index=True)
+    status: Mapped[str] = mapped_column(String(20), default="recommended")
+    essentials: Mapped[float] = mapped_column(Numeric(14, 2), default=0)
+    flexible: Mapped[float] = mapped_column(Numeric(14, 2), default=0)
+    savings: Mapped[float] = mapped_column(Numeric(14, 2), default=0)
+    safety_buffer: Mapped[float] = mapped_column(Numeric(14, 2), default=0)
+    categories: Mapped[dict] = mapped_column(JSON, default=dict)
+    budget_id: Mapped[int | None] = mapped_column(ForeignKey("budgets.id"), nullable=True)
+    accepted_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
 class SavingsGoal(Base):
     __tablename__ = "savings_goals"
     id: Mapped[int] = mapped_column(primary_key=True)
@@ -76,6 +101,16 @@ class SavingsGoal(Base):
     target_date: Mapped[date] = mapped_column(Date)
     status: Mapped[str] = mapped_column(String(20), default="active")
     user: Mapped[User] = relationship(back_populates="goals")
+
+class GoalPlanSettings(Base):
+    """Persistent user choices for a goal's savings plan."""
+    __tablename__ = "goal_plan_settings"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    goal_id: Mapped[int] = mapped_column(ForeignKey("savings_goals.id"), unique=True, index=True)
+    category: Mapped[str] = mapped_column(String(40), default="Other")
+    saving_preference: Mapped[str] = mapped_column(String(20), default="flexible")
+    note: Mapped[str | None] = mapped_column(String(280), nullable=True)
+    planned_monthly_amount: Mapped[float | None] = mapped_column(Numeric(14, 2), nullable=True)
 
 class BudgetCategory(Base):
     __tablename__ = "budget_categories"
@@ -113,13 +148,57 @@ class CategoryFeedback(Base):
 
 class FinancialLesson(Base):
     __tablename__ = "financial_lessons"
-    id: Mapped[int] = mapped_column(primary_key=True); title: Mapped[str] = mapped_column(String(140)); content: Mapped[str] = mapped_column(Text); trigger_key: Mapped[str] = mapped_column(String(60))
+    id: Mapped[int] = mapped_column(primary_key=True)
+    title: Mapped[str] = mapped_column(String(140))
+    summary: Mapped[str] = mapped_column(String(280))
+    content: Mapped[str] = mapped_column(Text)
+    content_bn: Mapped[str | None] = mapped_column(Text, nullable=True)
+    category: Mapped[str] = mapped_column(String(40), index=True)
+    difficulty: Mapped[str] = mapped_column(String(20), default="beginner")
+    duration_minutes: Mapped[int] = mapped_column(default=2)
+    personalized_section: Mapped[str | None] = mapped_column(Text, nullable=True)
+    personalized_section_bn: Mapped[str | None] = mapped_column(Text, nullable=True)
+    quiz: Mapped[dict] = mapped_column(JSON, default=dict)
+    trigger_type: Mapped[str] = mapped_column(String(60), index=True)
+    trigger_rule: Mapped[dict] = mapped_column(JSON, default=dict)
+    active: Mapped[bool] = mapped_column(Boolean, default=True)
+
 class LessonProgress(Base):
     __tablename__ = "lesson_progress"
-    id: Mapped[int] = mapped_column(primary_key=True); user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True); lesson_id: Mapped[int] = mapped_column(ForeignKey("financial_lessons.id")); completed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
+    lesson_id: Mapped[int] = mapped_column(ForeignKey("financial_lessons.id"))
+    started_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    quiz_score: Mapped[int | None] = mapped_column(nullable=True)
+    __table_args__ = (UniqueConstraint("user_id", "lesson_id", name="uq_lesson_progress_user_lesson"),)
+
+class SavedOffer(Base):
+    __tablename__ = "saved_offers"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
+    offer_id: Mapped[int] = mapped_column(ForeignKey("offers.id"), index=True)
+    saved_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    __table_args__ = (UniqueConstraint("user_id", "offer_id", name="uq_saved_offer_user_offer"),)
 class Offer(Base):
     __tablename__ = "offers"
-    id: Mapped[int] = mapped_column(primary_key=True); merchant_id: Mapped[int | None] = mapped_column(ForeignKey("merchants.id"), nullable=True); title: Mapped[str] = mapped_column(String(140)); terms: Mapped[str] = mapped_column(Text); active: Mapped[bool] = mapped_column(Boolean, default=True)
+    id: Mapped[int] = mapped_column(primary_key=True)
+    merchant_id: Mapped[int | None] = mapped_column(ForeignKey("merchants.id"), nullable=True)
+    title: Mapped[str] = mapped_column(String(140))
+    terms: Mapped[str] = mapped_column(Text)
+    terms_bn: Mapped[str | None] = mapped_column(Text, nullable=True)
+    active: Mapped[bool] = mapped_column(Boolean, default=True)
+    category: Mapped[str] = mapped_column(String(40), index=True)
+    min_spend: Mapped[float | None] = mapped_column(Numeric(14, 2), nullable=True)
+    discount_percent: Mapped[float | None] = mapped_column(Numeric(5, 2), nullable=True)
+    discount_fixed: Mapped[float | None] = mapped_column(Numeric(14, 2), nullable=True)
+    max_discount: Mapped[float | None] = mapped_column(Numeric(14, 2), nullable=True)
+    typical_purchase: Mapped[float | None] = mapped_column(Numeric(14, 2), nullable=True)
+    typical_merchant: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    potential_saving: Mapped[float | None] = mapped_column(Numeric(14, 2), nullable=True)
+    expiry_date: Mapped[date | None] = mapped_column(Date, nullable=True)
+    eligibility_notes: Mapped[str | None] = mapped_column(String(280), nullable=True)
+    learning_lesson_id: Mapped[int | None] = mapped_column(ForeignKey("financial_lessons.id"), nullable=True)
 class UserOfferPreference(Base):
     __tablename__ = "user_offer_preferences"
     id: Mapped[int] = mapped_column(primary_key=True); user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), unique=True); personalized_offers_enabled: Mapped[bool] = mapped_column(Boolean, default=True)
@@ -129,6 +208,35 @@ class ChatConversation(Base):
 class ChatMessage(Base):
     __tablename__ = "chat_messages"
     id: Mapped[int] = mapped_column(primary_key=True); conversation_id: Mapped[int] = mapped_column(ForeignKey("chat_conversations.id"), index=True); role: Mapped[str] = mapped_column(String(12)); content: Mapped[str] = mapped_column(Text); created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+# Server-owned state for the natural-language action assistant.  It contains
+# action slots and draft references only; PINs and authorization secrets never
+# enter this table or chat history.
+class AssistantConversation(Base):
+    __tablename__ = "assistant_conversations"
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
+    active_intent: Mapped[str | None] = mapped_column(String(60), nullable=True)
+    state: Mapped[str] = mapped_column(String(40), default="IDLE")
+    slots: Mapped[dict] = mapped_column(JSON, default=dict)
+    language: Mapped[str] = mapped_column(String(8), default="en")
+    pending_action_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+class AssistantActionDraft(Base):
+    __tablename__ = "assistant_action_drafts"
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
+    conversation_id: Mapped[str] = mapped_column(ForeignKey("assistant_conversations.id"), index=True)
+    action_type: Mapped[str] = mapped_column(String(60), index=True)
+    state: Mapped[str] = mapped_column(String(40), default="READY_FOR_REVIEW")
+    parameters: Mapped[dict] = mapped_column(JSON, default=dict)
+    preview: Mapped[dict] = mapped_column(JSON, default=dict)
+    transaction_draft_id: Mapped[int | None] = mapped_column(ForeignKey("transaction_drafts.id"), nullable=True)
+    requires_authorization: Mapped[bool] = mapped_column(Boolean, default=False)
+    executed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 class UserFeedback(Base):
     __tablename__ = "user_feedback"
     id: Mapped[int] = mapped_column(primary_key=True); user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True); feedback_type: Mapped[str] = mapped_column(String(40)); payload: Mapped[dict] = mapped_column(JSON, default=dict); created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
@@ -139,10 +247,42 @@ class TrustedContact(Base):
     user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
     name: Mapped[str] = mapped_column(String(80))
     phone_number: Mapped[str] = mapped_column(String(20))
+    # E.164-ish local canonical form (8801XXXXXXXXX), used only for matching
+    # and de-duplication. `phone_number` remains the display-safe source.
+    normalized_phone: Mapped[str] = mapped_column(String(20), index=True)
     relationship: Mapped[str] = mapped_column(String(40), default="Known")
     nickname: Mapped[str | None] = mapped_column(String(40), nullable=True)
-    is_trusted: Mapped[bool] = mapped_column(Boolean, default=True)
+    notes: Mapped[str | None] = mapped_column(String(280), nullable=True)
+    verification_status: Mapped[str] = mapped_column(String(20), default="unverified", index=True)
+    verified_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    # Retained for compatibility with early assistant records. New UI never
+    # calls a saved person "trusted" merely because it has history.
+    is_trusted: Mapped[bool] = mapped_column(Boolean, default=False)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    archived_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True, index=True)
+    __table_args__ = (UniqueConstraint("user_id", "normalized_phone", name="uq_trusted_contact_user_phone"),)
+
+class PaymentRequest(Base):
+    """A user-created request; it never represents money received or sent."""
+    __tablename__ = "payment_requests"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
+    trusted_contact_id: Mapped[int] = mapped_column(ForeignKey("trusted_contacts.id"), index=True)
+    recipient_name: Mapped[str] = mapped_column(String(80))
+    recipient_phone: Mapped[str] = mapped_column(String(20))
+    amount: Mapped[float] = mapped_column(Numeric(14, 2))
+    note: Mapped[str | None] = mapped_column(String(140), nullable=True)
+    status: Mapped[str] = mapped_column(String(24), default="requested", index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, index=True)
+
+class TrustedContactAudit(Base):
+    __tablename__ = "trusted_contact_audit"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
+    trusted_contact_id: Mapped[int | None] = mapped_column(ForeignKey("trusted_contacts.id"), nullable=True, index=True)
+    event_type: Mapped[str] = mapped_column(String(64), index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, index=True)
 
 class TrustedHelper(Base):
     __tablename__ = "trusted_helpers"
@@ -157,6 +297,48 @@ class TrustedHelper(Base):
     can_view_history: Mapped[bool] = mapped_column(Boolean, default=False)
     can_initiate: Mapped[bool] = mapped_column(Boolean, default=False)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+# Helper Mode uses a separate relationship record rather than treating a helper
+# as a contact.  The legacy TrustedHelper table is retained for backwards
+# compatibility with early demo data; all new Helper Mode APIs use these tables.
+class HelperRelationship(Base):
+    __tablename__ = "helper_relationships"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    owner_user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
+    helper_user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True, index=True)
+    helper_name: Mapped[str] = mapped_column(String(80))
+    helper_phone: Mapped[str] = mapped_column(String(20), index=True)
+    relationship: Mapped[str] = mapped_column(String(40))
+    status: Mapped[str] = mapped_column(String(16), default="pending", index=True)
+    permissions: Mapped[list[str]] = mapped_column(JSON, default=list)
+    invited_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    accepted_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    revoked_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    __table_args__ = (Index("ix_helper_relationship_owner_phone", "owner_user_id", "helper_phone", unique=True),)
+
+class HelperActivity(Base):
+    __tablename__ = "helper_activities"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    owner_user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
+    helper_relationship_id: Mapped[int | None] = mapped_column(ForeignKey("helper_relationships.id"), nullable=True, index=True)
+    actor: Mapped[str] = mapped_column(String(16), default="owner")
+    event_type: Mapped[str] = mapped_column(String(64), index=True)
+    detail: Mapped[str | None] = mapped_column(String(280), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, index=True)
+
+class HelperAssistanceRequest(Base):
+    __tablename__ = "helper_assistance_requests"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    owner_user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
+    helper_relationship_id: Mapped[int] = mapped_column(ForeignKey("helper_relationships.id"), index=True)
+    request_type: Mapped[str] = mapped_column(String(40), default="guidance")
+    title: Mapped[str] = mapped_column(String(160))
+    detail: Mapped[str | None] = mapped_column(String(280), nullable=True)
+    status: Mapped[str] = mapped_column(String(24), default="waiting_owner_confirmation", index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    reviewed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 
 class TransactionDraft(Base):
     __tablename__ = "transaction_drafts"

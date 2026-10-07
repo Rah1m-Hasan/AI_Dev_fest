@@ -486,7 +486,21 @@ GET /api/v1/analytics/recurring
 GET /api/v1/analytics/comparison
 ```
 
-### AI Coach
+### AI Assistant (primary conversational entry point)
+
+```
+POST /api/v1/assistant/message
+POST /api/v1/assistant/actions/{id}/confirm
+POST /api/v1/assistant/actions/{id}/authorize  # PIN stays outside the LLM
+DELETE /api/v1/assistant/actions/{id}
+```
+
+`/assistant/message` is the UI's single conversational endpoint. It uses Groq
+for validated routing and grounded wording when configured, then falls back to
+deterministic intent handling and templates without exposing provider errors.
+The older coach routes below remain for backwards compatibility.
+
+### Legacy AI Coach routes
 
 ```
 POST /api/v1/coach/chat
@@ -746,9 +760,10 @@ npm run build
 
 ## Live Deployment
 
-```
-Live URL: [TO BE ADDED AFTER VERCEL DEPLOYMENT]
-```
+**Frontend:** https://ai-dev-fest.vercel.app  
+**Backend API:** https://backend-kappa-sooty-49.vercel.app
+
+Demo login: `demo.student@upay.local` / `password`
 
 ### Planned Production Architecture
 
