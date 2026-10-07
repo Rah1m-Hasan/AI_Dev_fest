@@ -91,6 +91,8 @@ AI assists the user at every step, while important financial calculations and co
 - **Safe-to-Save** — Week-by-week savings feasibility range
 - **Financial Health Score** — Explainable 0–100 score (not a credit score)
 - **Money Story** — Auto-derived events: income, unusual purchases, category changes, recurring payments
+- **Personal Spending Forecast** — Lightweight Random Forest estimates for next-7-day and next-30-day spending
+- **Financial Risk Classification** — Lightweight Random Forest `LOW`/`MEDIUM`/`HIGH` liquidity-stress signal, with a deterministic fallback
 
 ### Spending & Transactions
 - Transaction history with category labels
@@ -242,6 +244,7 @@ No AI service participates in transaction execution or PIN verification.
 | Charts | Recharts |
 | Icons | Lucide React |
 | Testing | pytest |
+| ML | scikit-learn Random Forests + joblib (CPU-only, optional) |
 
 ---
 
@@ -383,6 +386,22 @@ cp .env.example .env
 cd backend
 source .venv/bin/activate
 uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+```
+
+### Train the optional ML models
+
+```bash
+cd backend
+python -m app.ml.train_models
+```
+
+This creates compact local joblib artifacts and `app/ml/models/model_metrics.json`. The dashboard's **AI Financial Forecast** section shows only these saved, real holdout metrics. If the artifacts are absent, the app keeps using deterministic forecasts and safety calculations.
+
+### View saved model evaluation
+
+```bash
+cd backend
+python -m json.tool app/ml/models/model_metrics.json
 ```
 
 - API running at: http://localhost:8000

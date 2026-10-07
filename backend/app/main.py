@@ -6,7 +6,7 @@ from fastapi import FastAPI, Depends, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import select, func
 from sqlalchemy.orm import Session
-from app.db import Base,engine,get_db
+from app.db import Base,engine,get_db,upgrade_database
 from app.models import User,Transaction,Budget,PlanState,SavingsGoal,SavingsContribution,GoalPlanSettings,Notification,CategoryFeedback,HelperRelationship,HelperActivity,HelperAssistanceRequest,PaymentRequest,TrustedContact,TrustedContactAudit
 from app.schemas import LoginIn,BudgetIn,PlanIn,GoalIn,GoalUpdateIn,GoalPreviewIn,ContributionIn,ChatIn,CategoryCorrection,ScenarioIn,IntentIn,SendMoneyIn,TrustedContactIn,TrustedContactUpdateIn,PaymentRequestIn,TransactionDraftIn,TrustedHelperIn,HelperRequestIn,HelperModeCreateIn,HelperPermissionsIn,HelperRequestReviewIn,HelperAssistancePrepareIn,AssistantMessageIn,AssistantAuthorizeIn,CompleteLessonIn
 from app.api.deps import current_user
@@ -23,8 +23,17 @@ async def lifespan(app):
     if settings.environment.lower() in {"production","staging"}:
         if settings.jwt_secret_key == "demo-only-change-me":
             raise RuntimeError("JWT_SECRET_KEY must be configured outside demo development")
+    upgrade_database()
     Base.metadata.create_all(bind=engine)
-    db=next(get_db()); seed(db); db.close(); yield
+    db=next(get_db()); seed(db); db.close()
+    # Loading is optional and cached. A missing/corrupt artifact must never
+    # prevent the deterministic coach from starting.
+    try:
+        from app.ml.model_service import get_model_service
+        get_model_service().load()
+    except Exception:
+        pass
+    yield
 app=FastAPI(title="Upay AI Financial Coach",version="1.0.0",lifespan=lifespan,description="Synthetic-data concept prototype. Not an official upay service.")
 app.add_middleware(CORSMiddleware,allow_origins=[get_settings().frontend_url],allow_credentials=True,allow_methods=["GET","POST","PUT","PATCH","DELETE"],allow_headers=["Authorization","Content-Type"])
 
@@ -82,7 +91,36 @@ def dashboard(user:User=Depends(current_user),db:Session=Depends(get_db)):
     for t in tx:
         if is_spending(t):weekly[f"Week {(t.timestamp-start).days//7+1}"]+=float(t.amount)
     from app.services.safe_to_spend_service import calculate_safe_to_spend
-    return {"disclaimer":"Concept prototype — synthetic demo data, not an official production upay service.","period_label":"Last 30 days","balance":amount(user.account.balance),"this_month":{"income":amount(income),"spending":amount(expense),"savings":amount(income-expense)},"budget":{"limit":amount(b.total_limit) if b else 0,"used":amount(expense),"utilization":round(float(expense/b.total_limit*100),1) if b else 0},"health":health_score(db,user),"spending_breakdown":sp["category_totals"],"weekly_spend":[{"week":k,"amount":round(v,2)} for k,v in sorted(weekly.items())],"recent_transactions":[transaction_out(t) for t in tx[:6]],"ai_insight":{"title":"Calculated spending insight","text":f"{sp['biggest_category'] or 'No category'} is your largest spending category this period.","basis":"deterministic transaction aggregation"},"forecast":fc,"pulse":money_pulse(db,user),"runway":money_runway(db,user),"comparison":spending_comparison(db,user),"safe_to_spend":calculate_safe_to_spend(db,user),"safe_to_save":safe_to_save(db,user,7),"story":money_story(db,user)}
+    response={"disclaimer":"Concept prototype — synthetic demo data, not an official production upay service.","period_label":"Last 30 days","balance":amount(user.account.balance),"this_month":{"income":amount(income),"spending":amount(expense),"savings":amount(income-expense)},"budget":{"limit":amount(b.total_limit) if b else 0,"used":amount(expense),"utilization":round(float(expense/b.total_limit*100),1) if b else 0},"health":health_score(db,user),"spending_breakdown":sp["category_totals"],"weekly_spend":[{"week":k,"amount":round(v,2)} for k,v in sorted(weekly.items())],"recent_transactions":[transaction_out(t) for t in tx[:6]],"ai_insight":{"title":"Calculated spending insight","text":f"{sp['biggest_category'] or 'No category'} is your largest spending category this period.","basis":"deterministic transaction aggregation"},"forecast":fc,"pulse":money_pulse(db,user),"runway":money_runway(db,user),"comparison":spending_comparison(db,user),"safe_to_spend":calculate_safe_to_spend(db,user),"safe_to_save":safe_to_save(db,user,7),"story":money_story(db,user)}
+    try:
+        from app.services.ml_financial_service import get_ml_summary
+        response["ml"]=get_ml_summary(db,user)
+    except Exception:
+        # The regular dashboard deliberately remains independent of ML.
+        pass
+    return response
+
+@app.get("/api/v1/ml/forecast")
+def ml_forecast(user:User=Depends(current_user),db:Session=Depends(get_db)):
+    from app.services.ml_financial_service import get_spending_forecast
+    result=get_spending_forecast(db,user)
+    return {key:value for key,value in result.items() if key != "features"}
+
+@app.get("/api/v1/ml/risk")
+def ml_risk(user:User=Depends(current_user),db:Session=Depends(get_db)):
+    from app.services.ml_financial_service import get_financial_risk
+    result=get_financial_risk(db,user)
+    return {key:value for key,value in result.items() if key != "features"}
+
+@app.get("/api/v1/ml/summary")
+def ml_summary(user:User=Depends(current_user),db:Session=Depends(get_db)):
+    from app.services.ml_financial_service import get_ml_summary
+    return get_ml_summary(db,user)
+
+@app.get("/api/v1/ml/metrics")
+def ml_metrics(user:User=Depends(current_user)):
+    from app.services.ml_financial_service import get_metrics
+    return get_metrics()
 
 @app.get("/api/v1/intelligence/overview")
 def intelligence_overview(user:User=Depends(current_user),db:Session=Depends(get_db)):

@@ -1,10 +1,23 @@
 from functools import lru_cache
+import os
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+
+def _default_database_url() -> str:
+    """Use Vercel's writable temporary directory when no managed DB is set.
+
+    A managed PostgreSQL DATABASE_URL always takes precedence. The /tmp
+    fallback keeps this synthetic demo usable in serverless previews, where
+    the deployed source filesystem is read-only.
+    """
+    if os.getenv("VERCEL"):
+        return "sqlite:////tmp/upay_demo.sqlite3"
+    return "sqlite:///./upay_demo.sqlite3"
+
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
-    database_url: str = Field(default="sqlite:///./upay_demo.sqlite3", alias="DATABASE_URL")
+    database_url: str = Field(default_factory=_default_database_url, alias="DATABASE_URL")
     groq_api_key: str = Field(default="", alias="GROQ_API_KEY")
     groq_model: str = Field(default="qwen/qwen3.8-27b", alias="GROQ_MODEL")
     ai_enabled: bool = Field(default=True, alias="AI_ENABLED")

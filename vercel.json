@@ -5,10 +5,15 @@
   "outputDirectory": "frontend/dist",
   "installCommand": "cd frontend && npm ci",
   "regions": ["sin1"],
+  "functions": {
+    "api/index.py": {
+      "includeFiles": "backend/**"
+    }
+  },
   "rewrites": [
     {
-      "source": "/api/v1/(.*)",
-      "destination": "https://backend-qg94rzuv1-ora-3-jon.vercel.app/api/v1/$1"
+      "source": "/api/v1/:path*",
+      "destination": "/api/index.py"
     },
     {
       "source": "/(.*)",

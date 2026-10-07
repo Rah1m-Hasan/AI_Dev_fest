@@ -640,11 +640,20 @@ def prepare_action(db: Session, user, conversation, action: str, slots: dict, qu
         data={"balance": amount(user.account.balance), "currency": "BDT"}
         return _insight(conversation, action, question, data, _say(conversation.language, f"Your available balance is **৳{float(user.account.balance):,.0f}**.", f"আপনার বর্তমান ব্যালেন্স **৳{float(user.account.balance):,.0f}**।"))
     if action == "safe_to_spend":
-        data = calculate_safe_to_spend(db, user); return _insight(conversation, action, question, data, _say(conversation.language, f"You can safely spend about **৳{data['safe_to_spend']:,.0f}** after commitments and your safety reserve.", f"প্রয়োজনীয় খরচ ও সেফটি রিজার্ভের পর আপনি প্রায় **৳{data['safe_to_spend']:,.0f}** নিরাপদে খরচ করতে পারেন।"))
+        from app.services.ml_financial_service import get_financial_risk, get_spending_forecast
+        data = calculate_safe_to_spend(db, user)
+        prediction = get_spending_forecast(db, user)
+        risk = get_financial_risk(db, user, prediction)
+        data["ml_context"] = {"predicted_7_day_spending": prediction["predicted_7_day_spending"], "financial_risk": risk["risk_level"], "forecast_source": prediction["source"]}
+        return _insight(conversation, action, question, data, _say(conversation.language, f"You can safely spend about **৳{data['safe_to_spend']:,.0f}** after commitments and your safety reserve.", f"প্রয়োজনীয় খরচ ও সেফটি রিজার্ভের পর আপনি প্রায় **৳{data['safe_to_spend']:,.0f}** নিরাপদে খরচ করতে পারেন।"))
     if action == "explain_spending":
         data = run_out_analysis(db, user); return _insight(conversation, action, question, data, _say(conversation.language, f"You spent **৳{data['total_expense']:,.0f}** in the last 30 days. {data.get('largest_category_increase', {}).get('category', 'Your largest category')} is the biggest measured change.", f"গত ৩০ দিনে আপনার খরচ **৳{data['total_expense']:,.0f}**। সবচেয়ে বড় পরিবর্তন হয়েছে {data.get('largest_category_increase', {}).get('category', 'আপনার প্রধান খরচের ক্যাটাগরি')}তে।"))
     if action == "money_runway":
+        from app.services.ml_financial_service import get_financial_risk, get_spending_forecast
         data = money_runway(db, user)
+        prediction = get_spending_forecast(db, user)
+        risk = get_financial_risk(db, user, prediction)
+        data["ml_context"] = {"predicted_7_day_spending": prediction["predicted_7_day_spending"], "financial_risk": risk["risk_level"], "forecast_source": prediction["source"]}
         return _insight(conversation, action, question, data, _say(conversation.language, f"At your recent pace, your estimated money runway is about **{data['days']} days**.", f"সাম্প্রতিক খরচের হিসেবে আপনার টাকার আনুমানিক রানওয়ে প্রায় **{data['days']} দিন**।"))
     if action == "compare_spending":
         data = spending_comparison(db, user)
@@ -669,7 +678,10 @@ def prepare_action(db: Session, user, conversation, action: str, slots: dict, qu
     if action == "affordability_analysis":
         requested = float(slots["amount"])
         safe = calculate_safe_to_spend(db, user)
-        data = {"purchase_amount": requested, "safe_to_spend": safe["safe_to_spend"], "current_balance": safe["current_balance"], "within_safe_to_spend": requested <= safe["safe_to_spend"]}
+        from app.services.ml_financial_service import get_financial_risk, get_spending_forecast
+        prediction = get_spending_forecast(db, user)
+        risk = get_financial_risk(db, user, prediction)
+        data = {"purchase_amount": requested, "safe_to_spend": safe["safe_to_spend"], "current_balance": safe["current_balance"], "within_safe_to_spend": requested <= safe["safe_to_spend"], "predicted_7_day_spending": prediction["predicted_7_day_spending"], "financial_risk": risk["risk_level"], "money_runway_days": money_runway(db, user)["days"], "forecast_source": prediction["source"]}
         fallback = f"A ৳{requested:,.0f} purchase is {'within' if data['within_safe_to_spend'] else 'above'} your calculated safe-to-spend amount of ৳{safe['safe_to_spend']:,.0f}."
         return _insight(conversation, action, question, data, fallback)
     if action == "simulate_scenario":

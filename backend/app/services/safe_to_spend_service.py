@@ -35,10 +35,18 @@ def calculate_safe_to_spend(db: Session, user: User, days: int = 7) -> dict:
     recommended_reserve = dec(rec.get("emergency_buffer", 1000))
     reserved_savings = max(Decimal("0"), dec(rec.get("savings_target", 0))) * Decimal(days) / Decimal("30.44")
 
-    # Calculate safe to spend
+    # Include only the non-recurring part of a trained forecast. Known recurring
+    # bills are already listed as commitments above, so subtracting both in full
+    # would double-count the same obligation. The deterministic fallback keeps
+    # the original calculation unchanged.
+    forecasted_necessary_spending = Decimal("0")
+    if fc.get("source") == "ml":
+        forecasted_necessary_spending = max(Decimal("0"), dec(fc.get("expected_expenses", 0)) - upcoming_expenses)
+
+    # Calculate safe to spend; reserves and commitments remain authoritative.
     safe_to_spend = max(
         Decimal("0"),
-        available_balance - upcoming_expenses - recommended_reserve - reserved_savings
+        available_balance - upcoming_expenses - recommended_reserve - reserved_savings - forecasted_necessary_spending
     )
 
     # Build breakdown
@@ -47,6 +55,7 @@ def calculate_safe_to_spend(db: Session, user: User, days: int = 7) -> dict:
         "upcoming_committed_expenses": amount(upcoming_expenses),
         "recommended_reserve": amount(recommended_reserve),
         "reserved_savings": amount(reserved_savings),
+        "forecasted_necessary_spending": amount(forecasted_necessary_spending),
         "safe_to_spend": amount(safe_to_spend),
     }
 
@@ -66,6 +75,8 @@ def calculate_safe_to_spend(db: Session, user: User, days: int = 7) -> dict:
         "upcoming_committed_expenses": amount(upcoming_expenses),
         "recommended_reserve": amount(recommended_reserve),
         "reserved_savings": amount(reserved_savings),
+        "forecasted_necessary_spending": amount(forecasted_necessary_spending),
+        "forecast_source": fc.get("source", "deterministic_fallback"),
         "safe_to_spend": amount(safe_to_spend),
         "days": days,
         "breakdown": breakdown,
@@ -75,6 +86,7 @@ def calculate_safe_to_spend(db: Session, user: User, days: int = 7) -> dict:
             f"Upcoming committed expenses: ৳{amount(upcoming_expenses):,.0f}",
             f"Recommended reserve: ৳{amount(recommended_reserve):,.0f}",
             f"Savings commitment: ৳{amount(reserved_savings):,.0f}",
+            f"Forecasted necessary spending: ৳{amount(forecasted_necessary_spending):,.0f}",
             f"Safe-to-spend: ৳{amount(safe_to_spend):,.0f}",
         ],
         "warning": None,

@@ -110,6 +110,29 @@ export type DashboardSummary = {
   comparison: {period: {start: string; end: string}; categories: Change[]; summary: string; source: string};
   safe_to_save: SafeToSave;
   story: MoneyStory;
+  ml?: MlSummary;
+};
+
+export type MlSummary = {
+  predicted_7_day_spending: number;
+  predicted_30_day_spending: number;
+  predicted_month_end_balance: number;
+  financial_risk: 'LOW' | 'MEDIUM' | 'HIGH';
+  risk_probability?: number;
+  safe_to_spend: number;
+  safe_to_spend_per_day: number;
+  money_runway_days: number;
+  forecast_source: 'ml' | 'deterministic_fallback';
+  risk_source: 'ml' | 'deterministic_fallback';
+};
+
+export type MlMetrics = {
+  available: boolean;
+  training_samples?: number;
+  test_samples?: number;
+  test_split?: number;
+  spending_forecast?: {algorithm: string; mae: number; rmse: number; r2: number};
+  risk_classifier?: {algorithm: string; accuracy: number; precision: number; recall: number; f1: number; roc_auc?: number | null};
 };
 
 export type BudgetRecommendation = {

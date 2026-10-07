@@ -152,6 +152,9 @@ class FinancialLesson(Base):
     title: Mapped[str] = mapped_column(String(140))
     summary: Mapped[str] = mapped_column(String(280))
     content: Mapped[str] = mapped_column(Text)
+    # Kept for databases created by the first demo release, where this was a
+    # required column. New lesson matching uses trigger_type/trigger_rule.
+    trigger_key: Mapped[str] = mapped_column(String(60), default="general")
     content_bn: Mapped[str | None] = mapped_column(Text, nullable=True)
     category: Mapped[str] = mapped_column(String(40), index=True)
     difficulty: Mapped[str] = mapped_column(String(20), default="beginner")

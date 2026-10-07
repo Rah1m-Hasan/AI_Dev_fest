@@ -43,7 +43,7 @@ import {Link, Navigate, NavLink, Route, Routes, useLocation, useNavigate} from '
 import {api, token} from './api/client';
 import {Brand, Tag, TrustBadge} from './components/ui';
 import {ExplainMetricButton} from './components/ExplainMetricButton';
-import type {DashboardSummary, DemoUser} from './types';
+import type {DashboardSummary, DemoUser, MlMetrics, MlSummary} from './types';
 import {formatBDT, titleCase} from './format';
 import {
   GoalsPage,
@@ -199,6 +199,25 @@ function FinancialSignals({summary}: {summary: DashboardSummary}) {
   </section>;
 }
 
+function AIFinancialForecast({forecast}: {forecast?: MlSummary}) {
+  const [metrics, setMetrics] = useState<MlMetrics>();
+  useEffect(() => { void api<MlMetrics>('/ml/metrics').then(setMetrics).catch(() => undefined); }, []);
+  if (!forecast) return null;
+  const riskTone = forecast.financial_risk.toLowerCase();
+  return <section className="home-section ai-financial-forecast" aria-labelledby="ai-financial-forecast-title">
+    <div className="ai-financial-forecast__header"><div><span className="eyebrow">ML-enhanced estimate</span><h2 id="ai-financial-forecast-title">AI Financial Forecast</h2><p>Behavior prediction supports your existing safety calculations.</p></div><Tag tone={forecast.financial_risk === 'LOW' ? 'positive' : 'warning'}>{forecast.financial_risk} risk</Tag></div>
+    <div className="ai-financial-forecast__grid">
+      <div><small>Predicted spending</small><strong>{formatBDT(forecast.predicted_7_day_spending)}</strong><span>Next 7 days</span></div>
+      <div><small>Predicted spending</small><strong>{formatBDT(forecast.predicted_30_day_spending)}</strong><span>Next 30 days</span></div>
+      <div className={`ai-risk ai-risk--${riskTone}`}><small>Financial risk</small><strong>{forecast.financial_risk}</strong><span>{forecast.risk_probability === undefined ? 'Liquidity signal' : `${Math.round(forecast.risk_probability * 100)}% model confidence`}</span></div>
+      <div><small>Expected month-end balance</small><strong>{formatBDT(forecast.predicted_month_end_balance)}</strong><span>Estimate, not a guarantee</span></div>
+      <div><small>Money runway</small><strong>{forecast.money_runway_days} days</strong><span>Using predicted pace</span></div>
+      <div><small>Safe-to-spend</small><strong>{formatBDT(forecast.safe_to_spend_per_day)}</strong><span>Per day after reserves</span></div>
+    </div>
+    <details className="ai-model-metrics"><summary>Model performance for judges</summary>{metrics?.available && metrics.spending_forecast && metrics.risk_classifier ? <div className="ai-model-metrics__grid"><div><strong>Spending Forecast Model</strong><span>{metrics.spending_forecast.algorithm}</span><small>MAE {formatBDT(metrics.spending_forecast.mae)} · RMSE {formatBDT(metrics.spending_forecast.rmse)} · R² {metrics.spending_forecast.r2.toFixed(3)}</small></div><div><strong>Financial Risk Model</strong><span>{metrics.risk_classifier.algorithm}</span><small>Accuracy {(metrics.risk_classifier.accuracy * 100).toFixed(1)}% · Precision {(metrics.risk_classifier.precision * 100).toFixed(1)}% · Recall {(metrics.risk_classifier.recall * 100).toFixed(1)}% · F1 {(metrics.risk_classifier.f1 * 100).toFixed(1)}%{metrics.risk_classifier.roc_auc === null || metrics.risk_classifier.roc_auc === undefined ? '' : ` · ROC-AUC ${metrics.risk_classifier.roc_auc.toFixed(3)}`}</small></div><p>{metrics.training_samples?.toLocaleString()} synthetic training samples · {(metrics.test_split || .2) * 100}% holdout test split</p></div> : <p>Saved model metrics are unavailable; deterministic calculations remain active.</p>}</details>
+  </section>;
+}
+
 function RecentTransactions({summary, error, retry}: {summary?: DashboardSummary; error?: boolean; retry: () => void}) {
   return <section className="home-section">
     <SectionHeader title="Recent transactions" action={<Link to="/coach/transactions">See all <ArrowRight /></Link>} />
@@ -242,6 +261,7 @@ function UpayHome({user}: {user: DemoUser}) {
   return <div className="home-dashboard page">
     <HomeOverview summary={summary} balance={balance} hidden={hidden} error={loadError} onToggle={() => setHidden(!hidden)} />
     {summary ? <FinancialSignals summary={summary} /> : loadError ? <section className="home-section"><SectionHeader title="Smart financial signals" /><div className="home-signals-error"><Activity /><span><strong>Money signals couldn’t be refreshed.</strong><small>Try again to load your personalized financial picture.</small></span><button className="text-button" onClick={loadSummary}>Try again</button></div></section> : <section className="home-section"><SectionHeader title="Smart financial signals" /><div className="signal-grid signal-grid--loading"><i /><i /><i /></div></section>}
+    <AIFinancialForecast forecast={summary?.ml} />
     <QuickActionsSection services={services} />
     <RecentTransactions summary={summary} error={loadError} retry={loadSummary} />
     <section className="home-section home-secondary">

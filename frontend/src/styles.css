@@ -2603,6 +2603,10 @@ small { font-size: 12px; color: var(--quiet); }
 }
 
 /* ---- Wallet home: cohesive AI fintech dashboard ---- */
+.ai-financial-forecast { padding: 20px; border: 1px solid #cce4ec; border-radius: 18px; background: linear-gradient(135deg, #f7fcfe, #fff); box-shadow: 0 5px 16px rgb(19 60 91 / .05); }
+.ai-financial-forecast__header { display: flex; align-items: start; justify-content: space-between; gap: 16px; margin-bottom: 16px; }.ai-financial-forecast__header h2 { margin: 3px 0; color: var(--upay-navy); font-size: 20px; }.ai-financial-forecast__header p { margin: 0; color: var(--quiet); font-size: 12px; }
+.ai-financial-forecast__grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }.ai-financial-forecast__grid > div { display: grid; gap: 4px; min-height: 92px; padding: 12px; border: 1px solid #dce9ed; border-radius: 12px; background: #fff; }.ai-financial-forecast__grid small,.ai-financial-forecast__grid span { color: var(--quiet); font-size: 11px; }.ai-financial-forecast__grid strong { color: var(--upay-navy); font-size: 17px; font-variant-numeric: tabular-nums; }.ai-risk--low { border-color: #bee3cd !important; background: #f4fcf7 !important; }.ai-risk--medium { border-color: #efd79c !important; background: #fffaf0 !important; }.ai-risk--high { border-color: #efc3c8 !important; background: #fff6f6 !important; }.ai-risk--low strong { color: var(--green) !important; }.ai-risk--medium strong { color: #a66f13 !important; }.ai-risk--high strong { color: #b44b55 !important; }
+.ai-model-metrics { margin-top: 13px; padding-top: 13px; border-top: 1px solid var(--line); }.ai-model-metrics summary { color: var(--upay-blue); font-size: 12px; font-weight: 700; cursor: pointer; }.ai-model-metrics > p { margin: 10px 0 0; color: var(--quiet); font-size: 12px; }.ai-model-metrics__grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 12px; }.ai-model-metrics__grid > div { display: grid; gap: 3px; padding: 10px; border-radius: 10px; background: var(--surface-soft); }.ai-model-metrics__grid strong { color: var(--upay-navy); font-size: 12px; }.ai-model-metrics__grid span,.ai-model-metrics__grid small,.ai-model-metrics__grid p { color: var(--quiet); font-size: 11px; line-height: 1.45; }.ai-model-metrics__grid p { grid-column: 1 / -1; margin: 0; }
 .home-dashboard {
   max-width: 1180px;
   padding-bottom: 18px;
@@ -2972,6 +2976,7 @@ small { font-size: 12px; color: var(--quiet); }
 }
 
 @media (max-width: 620px) {
+  .ai-financial-forecast { padding: 16px; }.ai-financial-forecast__grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }.ai-financial-forecast__grid > div { min-height: 84px; }.ai-model-metrics__grid { grid-template-columns: 1fr; }
   .scenario-page__header { display:grid; gap:13px; padding:18px; border-radius:16px; }
   .scenario-page__header h1 { font-size:27px; }
   .scenario-page__header > div:last-child { justify-items:start; }

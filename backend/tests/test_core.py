@@ -122,7 +122,10 @@ def test_safe_to_spend_and_transfer_impact_reconcile():
     try:
         user=db.scalar(select(User).where(User.email=='demo.student@upay.local'))
         safe=calculate_safe_to_spend(db,user)
-        assert safe['safe_to_spend'] == max(0, round(safe['current_balance']-safe['upcoming_committed_expenses']-safe['recommended_reserve']-safe['reserved_savings'],2))
+        # The existing reserve/commitment calculation remains authoritative;
+        # an available ML forecast may add only its non-recurring spending
+        # estimate, which is separately inspectable in the response.
+        assert safe['safe_to_spend'] == max(0, round(safe['current_balance']-safe['upcoming_committed_expenses']-safe['recommended_reserve']-safe['reserved_savings']-safe['forecasted_necessary_spending'],2))
         impact=check_transaction_impact(db,user,2000)
         assert impact['total'] >= 2005
         assert impact['safe_to_spend_after'] <= safe['safe_to_spend']

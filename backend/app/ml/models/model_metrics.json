@@ -1,0 +1,146 @@
+{
+  "training_samples": 8000,
+  "test_samples": 1600,
+  "test_split": 0.2,
+  "random_state": 42,
+  "dataset": "synthetic_financial_training.csv",
+  "spending_forecast": {
+    "mae": 426.8419,
+    "rmse": 592.127,
+    "r2": 0.973262,
+    "next_7_days": {
+      "mae": 426.8419,
+      "rmse": 592.127,
+      "r2": 0.973262
+    },
+    "next_30_days": {
+      "mae": 1054.9182,
+      "rmse": 1427.8183,
+      "r2": 0.986229
+    },
+    "algorithm": "RandomForestRegressor",
+    "features": [
+      "avg_daily_spending_7",
+      "avg_daily_spending_30",
+      "total_spending_7",
+      "total_spending_30",
+      "transaction_count_7",
+      "transaction_count_30",
+      "average_transaction_amount",
+      "maximum_recent_transaction",
+      "current_balance",
+      "monthly_income",
+      "cash_out_spending_30",
+      "send_money_spending_30",
+      "shopping_spending_30",
+      "food_spending_30",
+      "bills_spending_30",
+      "mobile_recharge_spending_30",
+      "recurring_expenses_30",
+      "weekday_daily_spending",
+      "weekend_spending_ratio",
+      "days_since_income",
+      "previous_7_day_spending",
+      "previous_30_day_spending",
+      "spending_trend",
+      "balance_to_spending_ratio",
+      "spending_volatility"
+    ]
+  },
+  "risk_classifier": {
+    "accuracy": 0.95875,
+    "precision": 0.95956,
+    "recall": 0.95875,
+    "f1": 0.958983,
+    "confusion_matrix": [
+      [
+        618,
+        16,
+        0
+      ],
+      [
+        5,
+        456,
+        18
+      ],
+      [
+        0,
+        27,
+        460
+      ]
+    ],
+    "labels": [
+      "LOW",
+      "MEDIUM",
+      "HIGH"
+    ],
+    "classification_report": {
+      "LOW": {
+        "precision": 0.9919743178170144,
+        "recall": 0.9747634069400631,
+        "f1-score": 0.9832935560859188,
+        "support": 634.0
+      },
+      "MEDIUM": {
+        "precision": 0.9138276553106213,
+        "recall": 0.9519832985386222,
+        "f1-score": 0.9325153374233128,
+        "support": 479.0
+      },
+      "HIGH": {
+        "precision": 0.9623430962343096,
+        "recall": 0.944558521560575,
+        "f1-score": 0.9533678756476683,
+        "support": 487.0
+      },
+      "accuracy": 0.95875,
+      "macro avg": {
+        "precision": 0.9560483564539818,
+        "recall": 0.9571017423464201,
+        "f1-score": 0.9563922563856333,
+        "support": 1600.0
+      },
+      "weighted avg": {
+        "precision": 0.9595601576599272,
+        "recall": 0.95875,
+        "f1-score": 0.9589831978904086,
+        "support": 1600.0
+      }
+    },
+    "roc_auc": 0.996547,
+    "algorithm": "RandomForestClassifier",
+    "features": [
+      "avg_daily_spending_7",
+      "avg_daily_spending_30",
+      "total_spending_7",
+      "total_spending_30",
+      "transaction_count_7",
+      "transaction_count_30",
+      "average_transaction_amount",
+      "maximum_recent_transaction",
+      "current_balance",
+      "monthly_income",
+      "cash_out_spending_30",
+      "send_money_spending_30",
+      "shopping_spending_30",
+      "food_spending_30",
+      "bills_spending_30",
+      "mobile_recharge_spending_30",
+      "recurring_expenses_30",
+      "weekday_daily_spending",
+      "weekend_spending_ratio",
+      "days_since_income",
+      "previous_7_day_spending",
+      "previous_30_day_spending",
+      "spending_trend",
+      "balance_to_spending_ratio",
+      "spending_volatility",
+      "expected_7_day_spending",
+      "spending_to_income_ratio",
+      "balance_runway_days",
+      "emergency_reserve_ratio",
+      "bills_due_next_7_days",
+      "cash_out_ratio"
+    ]
+  }
+}

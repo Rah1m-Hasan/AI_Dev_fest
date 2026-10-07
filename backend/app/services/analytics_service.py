@@ -127,7 +127,19 @@ def forecast(db:Session,user:User,days:int=30):
         next_income_date=(now.replace(day=1,hour=10,minute=0,second=0,microsecond=0)+timedelta(days=32)).replace(day=1)
         expected_inc=typical_income if (next_income_date.date()-now.date()).days<=days else ZERO
     recurring=[t for t in history if t.is_recurring and is_spending(t)]
-    expected_exp=daily_exp*days; closing=dec(user.account.balance)+expected_inc-expected_exp
+    # The model is optional. When its artifact is unavailable, this remains the
+    # original rolling deterministic estimate and every downstream feature works.
+    forecast_source="deterministic_fallback"
+    expected_exp=daily_exp*days
+    try:
+        from app.ml.model_service import get_model_service
+        prediction=get_model_service().spending_prediction(history,current_balance=float(user.account.balance))
+        if prediction:
+            expected_exp=dec(prediction["predicted_7_day_spending"] if days==7 else prediction["predicted_30_day_spending"]*days/30)
+            forecast_source="ml"
+    except Exception:
+        pass
+    closing=dec(user.account.balance)+expected_inc-expected_exp
     upcoming=[]
     seen=set()
     for t in recurring:
@@ -138,9 +150,21 @@ def forecast(db:Session,user:User,days:int=30):
             in_days=(next_date.date()-now.date()).days
             if 0<in_days<=days: upcoming.append({"merchant":t.merchant_name,"amount":amount(t.amount),"expected_in_days":in_days,"expected_date":next_date.date().isoformat()})
             seen.add(key)
-    daily_values=[float(_money(_tx(db,user.id,now-timedelta(days=i+1),now-timedelta(days=i)),False)) for i in range(60)]
+    # ``history`` already contains the entire 60-day window. Re-querying the
+    # database once per day made one dashboard request issue hundreds of SQL
+    # statements through its nested calculations, which left the web UI in its
+    # loading state on a remote serverless database. Keep the same windows but
+    # calculate them in memory from that single result set.
+    daily_values = []
+    for i in range(60):
+        day_start = now - timedelta(days=i + 1)
+        day_end = now - timedelta(days=i)
+        daily_values.append(float(_money(
+            (row for row in history if day_start <= row.timestamp < day_end),
+            False,
+        )))
     mean=sum(daily_values)/60; variation=pstdev(daily_values)/mean if mean else 1; factor=min(Decimal("0.35"),max(Decimal("0.15"),Decimal(str(variation))))
-    return {"days":days,"expected_income":amount(expected_inc),"expected_income_date":next_income_date.date().isoformat() if next_income_date and expected_inc else None,"expected_expenses":amount(expected_exp),"expected_closing_balance":amount(closing),"predicted_recurring_expenses":sorted(upcoming,key=lambda x:x["expected_in_days"])[:5],"risk_of_low_balance":"important" if closing<Decimal("1000") else "attention" if closing<Decimal("3000") else "info","confidence":"low" if variation>1 or variable else "medium" if variation>.45 else "high","confidence_range":{"low":amount(expected_exp*(Decimal("1")-factor)),"high":amount(expected_exp*(Decimal("1")+factor))},"explanation":"Rolling 60-day spending averages, observed income timing, and recurring-payment timing; this is a range, not an actual charge.","historical":False}
+    return {"days":days,"expected_income":amount(expected_inc),"expected_income_date":next_income_date.date().isoformat() if next_income_date and expected_inc else None,"expected_expenses":amount(expected_exp),"expected_closing_balance":amount(closing),"predicted_recurring_expenses":sorted(upcoming,key=lambda x:x["expected_in_days"])[:5],"risk_of_low_balance":"important" if closing<Decimal("1000") else "attention" if closing<Decimal("3000") else "info","confidence":"low" if variation>1 or variable else "medium" if variation>.45 else "high","confidence_range":{"low":amount(expected_exp*(Decimal("1")-factor)),"high":amount(expected_exp*(Decimal("1")+factor))},"explanation":"ML-enhanced spending estimate when a trained local model is available; otherwise rolling 60-day spending averages and observed recurring-payment timing.","historical":False,"source":forecast_source}
 
 def run_out_analysis(db:Session,user:User):
     now,start,prev=period_bounds(); cur,old=_tx(db,user.id,start,now),_tx(db,user.id,prev,start)

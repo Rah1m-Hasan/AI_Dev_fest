@@ -1,0 +1,13 @@
+# Vercel installs Python function dependencies from the repository root.
+# Keep this explicit: Vercel's Python builder does not support pip's -r
+# include syntax in this file.
+fastapi>=0.115
+uvicorn[standard]>=0.30
+sqlalchemy>=2.0
+alembic>=1.13
+psycopg[binary]>=3.2
+pydantic>=2.7
+pydantic-settings>=2.2
+httpx>=0.27
+scikit-learn>=1.4
+joblib>=1.3
