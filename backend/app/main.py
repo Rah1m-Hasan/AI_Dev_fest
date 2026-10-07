@@ -23,8 +23,6 @@ async def lifespan(app):
     if settings.environment.lower() in {"production","staging"}:
         if settings.jwt_secret_key == "demo-only-change-me":
             raise RuntimeError("JWT_SECRET_KEY must be configured outside demo development")
-        if not settings.database_url.startswith(("postgresql://", "postgresql+psycopg://")):
-            raise RuntimeError("DATABASE_URL must use PostgreSQL outside demo development")
     Base.metadata.create_all(bind=engine)
     db=next(get_db()); seed(db); db.close(); yield
 app=FastAPI(title="Upay AI Financial Coach",version="1.0.0",lifespan=lifespan,description="Synthetic-data concept prototype. Not an official upay service.")

@@ -8,7 +8,7 @@
   "rewrites": [
     {
       "source": "/api/v1/(.*)",
-      "destination": "https://backend-jy3geoaor-ora-3-jon.vercel.app/api/v1/$1"
+      "destination": "https://backend-adtq451n5-ora-3-jon.vercel.app/api/v1/$1"
     },
     {
       "source": "/(.*)",
